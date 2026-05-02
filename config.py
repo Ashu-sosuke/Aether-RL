@@ -1,6 +1,6 @@
 import os
-import re
-from typing import Optional
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from dotenv import load_dotenv
 
 # Load .env if it exists (for local development)
@@ -43,7 +43,7 @@ class Settings:
 
     @property
     def async_database_url(self) -> str:
-        url = self.database_url
+        url = self.database_url.strip()
         
         # 1. Handle both postgres:// and postgresql:// schemes
         if url.startswith("postgres://"):
@@ -51,19 +51,33 @@ class Settings:
         elif url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         
-        # 2. Aggressively strip sslmode (case-insensitive)
-        # This regex removes ?sslmode=... or &sslmode=...
-        url = re.sub(r'([?&])sslmode=[^&]*', '', url, flags=re.IGNORECASE)
-        
-        # 3. Clean up potential artifacts like ?& or trailing ? or &
-        url = url.replace("?&", "?").replace("&&", "&").rstrip("?").rstrip("&")
+        return self._without_asyncpg_ssl_query_params(url)
 
-        # 4. Enforce ssl=true for Supabase/Cloud hosts if not already there
-        if ("supabase.co" in url or "render.com" in url) and "ssl=" not in url.lower():
-            separator = "&" if "?" in url else "?"
-            url += f"{separator}ssl=true"
-            
-        return url
+    @property
+    def async_database_connect_args(self) -> dict[str, Any]:
+        url = self.async_database_url
+        parsed = urlsplit(url)
+
+        if parsed.scheme != "postgresql+asyncpg":
+            return {}
+
+        host = (parsed.hostname or "").lower()
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            return {}
+
+        return {"ssl": True}
+
+    def _without_asyncpg_ssl_query_params(self, url: str) -> str:
+        parsed = urlsplit(url)
+        if parsed.scheme != "postgresql+asyncpg":
+            return url
+
+        query_items = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() not in {"sslmode", "ssl"}
+        ]
+        return urlunsplit(parsed._replace(query=urlencode(query_items)))
 
 try:
     settings = Settings()

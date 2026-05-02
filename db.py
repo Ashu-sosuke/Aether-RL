@@ -8,7 +8,11 @@ from config import settings
 
 try:
     print("INFO: Initializing database engine...", flush=True)
-    engine = create_async_engine(settings.async_database_url, echo=False)
+    engine = create_async_engine(
+        settings.async_database_url,
+        echo=False,
+        connect_args=settings.async_database_connect_args,
+    )
     AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession,
                                       expire_on_commit=False)
     print("INFO: Database engine initialized.", flush=True)
