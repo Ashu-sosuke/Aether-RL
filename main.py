@@ -4,27 +4,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import uuid
 
-from config import settings
-from db import engine, Base, get_db, ActionLogEntry
-from intent_parser import IntentParser
-from semantic_mapper import SemanticMapper
-from memory_store import MemoryStore
-from websocket_server import handle_websocket, sessions
+import traceback
+import sys
+
+try:
+    from config import settings
+    from db import engine, Base, get_db, ActionLogEntry
+    from intent_parser import IntentParser
+    from semantic_mapper import SemanticMapper
+    from memory_store import MemoryStore
+    from websocket_server import handle_websocket, sessions
+except Exception as e:
+    print("CRITICAL: Error during module-level imports/init")
+    traceback.print_exc()
+    sys.exit(1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create DB tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    # Init wandb if configured
-    if settings.wandb_api_key and settings.wandb_mode == "online":
-        import wandb
-        wandb.init(project="aether-brain", mode="online")
+    try:
+        # Startup: create DB tables
+        print("Starting up: Creating database tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("Database tables verified/created.")
         
-    yield
-    # Shutdown
-    await engine.dispose()
+        # Init wandb if configured
+        if settings.wandb_api_key and settings.wandb_mode == "online":
+            import wandb
+            print("Initializing wandb...")
+            wandb.init(project="aether-brain", mode="online")
+            
+        yield
+    except Exception as e:
+        print("CRITICAL: Error during lifespan startup")
+        traceback.print_exc()
+        raise e
+    finally:
+        # Shutdown
+        await engine.dispose()
 
 app = FastAPI(title="Project Aether — Neural Brain", lifespan=lifespan)
 
