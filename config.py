@@ -44,16 +44,22 @@ class Settings:
     @property
     def async_database_url(self) -> str:
         url = self.database_url
-        if url.startswith("postgresql://"):
+        
+        # 1. Handle both postgres:// and postgresql:// schemes
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         
-        # asyncpg DOES NOT support 'sslmode'. It only supports 'ssl'.
-        if "sslmode=" in url:
-            url = re.sub(r'([?&])sslmode=[^&]*', r'\1', url)
-            url = url.replace("?&", "?").replace("&&", "&").rstrip('?').rstrip('&')
+        # 2. Aggressively strip sslmode (case-insensitive)
+        # This regex removes ?sslmode=... or &sslmode=...
+        url = re.sub(r'([?&])sslmode=[^&]*', '', url, flags=re.IGNORECASE)
+        
+        # 3. Clean up potential artifacts like ?& or trailing ? or &
+        url = url.replace("?&", "?").replace("&&", "&").rstrip("?").rstrip("&")
 
-        # Ensure SSL for Supabase
-        if "supabase.co" in url and "ssl=" not in url:
+        # 4. Enforce ssl=true for Supabase/Cloud hosts if not already there
+        if ("supabase.co" in url or "render.com" in url) and "ssl=" not in url.lower():
             separator = "&" if "?" in url else "?"
             url += f"{separator}ssl=true"
             
