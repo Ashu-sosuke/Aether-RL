@@ -26,10 +26,16 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
-        if self.database_url.startswith("postgresql://"):
-            return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        # If it's already an async URL or something else like sqlite, return as is
-        return self.database_url
+        url = self.database_url
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        
+        # Ensure SSL for Supabase/Production
+        if "supabase.co" in url and "sslmode" not in url:
+            separator = "&" if "?" in url else "?"
+            url += f"{separator}sslmode=require"
+            
+        return url
 
     class Config:
         env_file = ".env"
