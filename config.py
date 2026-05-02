@@ -1,28 +1,45 @@
-from pydantic_settings import BaseSettings
+import os
+import re
 from typing import Optional
+from dotenv import load_dotenv
 
-class Settings(BaseSettings):
-    # LLM
-    gemini_api_key       : str
-    openai_api_key       : str = ""
+# Load .env if it exists (for local development)
+load_dotenv()
 
-    # Database
-    database_url         : str   # asyncpg postgresql+asyncpg://...
-    supabase_url         : str
-    supabase_key         : str
+class Settings:
+    def __init__(self):
+        print("INFO: Loading environment variables...", flush=True)
+        # LLM
+        self.gemini_api_key = self._get_required("GEMINI_API_KEY")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
-    # Redis
-    redis_url            : str = ""   # empty = disable Redis
+        # Database
+        self.database_url   = self._get_required("DATABASE_URL")
+        self.supabase_url   = self._get_required("SUPABASE_URL")
+        self.supabase_key   = self._get_required("SUPABASE_KEY")
 
-    # Wandb
-    wandb_api_key        : str = ""
-    wandb_mode           : str = "disabled"   # "online" | "disabled"
+        # Redis
+        self.redis_url      = os.getenv("REDIS_URL", "")
 
-    # App
-    environment          : str = "production"
-    server_url           : str = "http://localhost:8000"
-    token_bucket_capacity: int = 100
-    token_refill_rate    : float = 10.0   # per minute
+        # Wandb
+        self.wandb_api_key  = os.getenv("WANDB_API_KEY", "")
+        self.wandb_mode     = os.getenv("WANDB_MODE", "disabled")
+
+        # App
+        self.environment    = os.getenv("ENVIRONMENT", "production")
+        self.server_url     = os.getenv("SERVER_URL", "http://localhost:8000")
+        self.token_bucket_capacity = int(os.getenv("TOKEN_BUCKET_CAPACITY", "100"))
+        self.token_refill_rate     = float(os.getenv("TOKEN_REFILL_RATE", "10.0"))
+
+        print(f"INFO: Config loaded. Environment: {self.environment}", flush=True)
+
+    def _get_required(self, key: str) -> str:
+        val = os.getenv(key)
+        if not val:
+            print(f"CRITICAL: Missing required environment variable: {key}", flush=True)
+            # Don't raise here, let the full Traceback happen in the try/except block
+            raise ValueError(f"Missing required environment variable: {key}")
+        return val
 
     @property
     def async_database_url(self) -> str:
@@ -31,9 +48,7 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         
         # asyncpg DOES NOT support 'sslmode'. It only supports 'ssl'.
-        # We must remove 'sslmode' if it exists to avoid TypeError.
         if "sslmode=" in url:
-            import re
             url = re.sub(r'([?&])sslmode=[^&]*', r'\1', url)
             url = url.replace("?&", "?").replace("&&", "&").rstrip('?').rstrip('&')
 
@@ -44,18 +59,9 @@ class Settings(BaseSettings):
             
         return url
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
 try:
-    print("INFO: Loading configuration...", flush=True)
     settings = Settings()
-    print("INFO: Configuration loaded successfully.", flush=True)
 except Exception as e:
-    print("CRITICAL: Failed to load configuration!", flush=True)
-    import traceback
-    traceback.print_exc()
-    # Provide helpful hints for common Render issues
-    print("HINT: Check if all required environment variables (GEMINI_API_KEY, DATABASE_URL, etc.) are set in Render Dashboard.", flush=True)
-    raise e
+    print(f"CRITICAL: Settings initialization failed: {e}", flush=True)
+    import sys
+    sys.exit(1)
