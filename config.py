@@ -31,9 +31,10 @@ class Settings(BaseSettings):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         
         # Ensure SSL for Supabase/Production
-        if "supabase.co" in url and "sslmode" not in url:
+        # asyncpg expects 'ssl=require' rather than 'sslmode=require'
+        if "supabase.co" in url and "ssl" not in url:
             separator = "&" if "?" in url else "?"
-            url += f"{separator}sslmode=require"
+            url += f"{separator}ssl=require"
             
         return url
 
