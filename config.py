@@ -65,7 +65,8 @@ class Settings:
         if host in {"localhost", "127.0.0.1", "::1"}:
             return {"timeout": 10}
 
-        return {"ssl": True, "timeout": 10, "statement_cache_size": 0}
+        ssl_enabled = os.getenv("DB_SSL", "true").lower() == "true"
+        return {"ssl": ssl_enabled, "timeout": 10, "statement_cache_size": 0}
 
     @property
     def redacted_database_target(self) -> str:
