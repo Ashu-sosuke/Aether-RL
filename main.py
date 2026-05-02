@@ -1,3 +1,6 @@
+import sys
+print("DEBUG: main.py reached", flush=True)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +11,7 @@ import traceback
 import sys
 
 try:
-    print("INFO: Initializing settings...")
+    print("INFO: Initializing settings...", flush=True)
     from config import settings
     print(f"INFO: Environment: {settings.environment}")
     
