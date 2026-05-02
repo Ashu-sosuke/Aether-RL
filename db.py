@@ -8,6 +8,7 @@ from config import settings
 
 try:
     print("INFO: Initializing database engine...", flush=True)
+    print(f"INFO: Database target: {settings.redacted_database_target}", flush=True)
     engine = create_async_engine(
         settings.async_database_url,
         echo=False,

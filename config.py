@@ -63,9 +63,17 @@ class Settings:
 
         host = (parsed.hostname or "").lower()
         if host in {"localhost", "127.0.0.1", "::1"}:
-            return {}
+            return {"timeout": 10}
 
-        return {"ssl": True}
+        return {"ssl": True, "timeout": 10, "statement_cache_size": 0}
+
+    @property
+    def redacted_database_target(self) -> str:
+        parsed = urlsplit(self.async_database_url)
+        host = parsed.hostname or "unknown-host"
+        port = parsed.port or 5432
+        database = parsed.path.lstrip("/") or "unknown-db"
+        return f"{parsed.scheme}://{host}:{port}/{database}"
 
     def _without_asyncpg_ssl_query_params(self, url: str) -> str:
         parsed = urlsplit(url)
