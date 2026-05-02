@@ -1,5 +1,6 @@
-from sentence_transformers import SentenceTransformer
+from google import genai
 import numpy as np
+from config import settings
 from models import NodeData
 from typing import List, Tuple
 
@@ -8,7 +9,8 @@ class SemanticMapper:
     TOP_K     = 3
 
     def __init__(self):
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.model_id = "text-embedding-004"
         self._cache: dict[str, np.ndarray] = {}
 
     def find_best_node(self, intent: str,
@@ -21,13 +23,24 @@ class SemanticMapper:
 
         # Build text representations and embed all nodes
         node_texts = [n.to_text_repr() for n in nodes]
-        node_embs  = self.model.encode(node_texts,
-                                        batch_size=64,
-                                        normalize_embeddings=True)
+        
+        # Batch embed all nodes
+        response = self.client.models.embed_content(
+            model=self.model_id,
+            contents=node_texts,
+            config={"task_type": "RETRIEVAL_DOCUMENT"}
+        )
+        node_embs = np.array([e.values for e in response.embeddings])
+        
+        # Normalize node embeddings
+        norms = np.linalg.norm(node_embs, axis=1, keepdims=True) + 1e-8
+        node_embs_norm = node_embs / norms
+        
+        # Normalize intent embedding
         intent_emb_norm = intent_emb / (np.linalg.norm(intent_emb) + 1e-8)
 
-        # Cosine similarity (embeddings already normalised)
-        scores = node_embs @ intent_emb_norm
+        # Cosine similarity
+        scores = node_embs_norm @ intent_emb_norm
 
         best_idx   = int(np.argmax(scores))
         best_score = float(scores[best_idx])
@@ -42,8 +55,17 @@ class SemanticMapper:
 
     def _embed(self, text: str) -> np.ndarray:
         if text not in self._cache:
-            self._cache[text] = self.model.encode(
-                text, normalize_embeddings=True)
+            response = self.client.models.embed_content(
+                model=self.model_id,
+                contents=text,
+                config={"task_type": "RETRIEVAL_QUERY"}
+            )
+            # Response returns a list of embeddings if contents is a list, 
+            # or a single embedding if contents is a string.
+            # For a single string, it's response.embeddings[0] or response.embedding
+            # Actually, for google-genai, if contents is a string, response.embeddings is a list with one item.
+            self._cache[text] = np.array(response.embeddings[0].values)
+            
             if len(self._cache) > 512:   # LRU eviction
                 self._cache.pop(next(iter(self._cache)))
         return self._cache[text]
@@ -53,9 +75,6 @@ class SemanticMapper:
                        ) -> NodeData | None:
         if not candidates:
             return None
-        # Simple heuristic fallback: return highest scoring candidate
-        # even below threshold rather than making an extra LLM call
-        # (LLM call costs 3 tokens — only use if confidence very low)
         best_node, best_score = candidates[0]
         if best_score > 0.30:
             return best_node

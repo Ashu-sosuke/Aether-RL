@@ -1,4 +1,4 @@
-import google.generativeai as genai
+from google import genai
 import openai
 import json
 from config import settings
@@ -6,8 +6,8 @@ from models import TaskPlan, PlannedStep
 
 class IntentParser:
     def __init__(self):
-        genai.configure(api_key=settings.gemini_api_key)
-        self.model = genai.GenerativeModel("gemini-1.5-pro")
+        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self.model_id = "gemini-1.5-pro"
         self._fallback = openai.AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
 
     async def parse_goal(self, goal: str, memory_context: dict) -> TaskPlan:
@@ -15,7 +15,10 @@ class IntentParser:
 
         # Try Gemini first
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt
+            )
             raw = response.text
             return self._parse_response(raw, goal)
         except Exception as e:
