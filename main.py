@@ -8,14 +8,22 @@ import traceback
 import sys
 
 try:
+    print("INFO: Initializing settings...")
     from config import settings
+    print(f"INFO: Environment: {settings.environment}")
+    
+    print("INFO: Importing modules...")
     from db import engine, Base, get_db, ActionLogEntry
     from intent_parser import IntentParser
     from semantic_mapper import SemanticMapper
     from memory_store import MemoryStore
     from websocket_server import handle_websocket, sessions
+    print("INFO: Modules imported successfully.")
 except Exception as e:
     print("CRITICAL: Error during module-level imports/init")
+    # If it's a Pydantic ValidationError, it's likely missing env vars
+    if "ValidationError" in str(type(e)):
+        print("ERROR: Missing or invalid Environment Variables!")
     traceback.print_exc()
     sys.exit(1)
 
