@@ -48,4 +48,14 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
 
-settings = Settings()
+try:
+    print("INFO: Loading configuration...", flush=True)
+    settings = Settings()
+    print("INFO: Configuration loaded successfully.", flush=True)
+except Exception as e:
+    print("CRITICAL: Failed to load configuration!", flush=True)
+    import traceback
+    traceback.print_exc()
+    # Provide helpful hints for common Render issues
+    print("HINT: Check if all required environment variables (GEMINI_API_KEY, DATABASE_URL, etc.) are set in Render Dashboard.", flush=True)
+    raise e

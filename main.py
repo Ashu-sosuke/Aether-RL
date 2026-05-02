@@ -57,9 +57,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Project Aether — Neural Brain", lifespan=lifespan)
 
 # Singletons
-parser  = IntentParser()
-mapper  = SemanticMapper()
-memory  = MemoryStore()
+print("INFO: Initializing Singletons (Parser, Mapper, Memory)...", flush=True)
+try:
+    parser  = IntentParser()
+    print("INFO: IntentParser initialized.", flush=True)
+    mapper  = SemanticMapper()
+    print("INFO: SemanticMapper initialized.", flush=True)
+    memory  = MemoryStore()
+    print("INFO: MemoryStore initialized.", flush=True)
+except Exception as e:
+    print("CRITICAL: Failed to initialize singletons!", flush=True)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+print("INFO: All systems go. Starting FastAPI app...", flush=True)
 
 @app.get("/ping")
 async def ping():

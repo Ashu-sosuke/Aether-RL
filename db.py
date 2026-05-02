@@ -6,9 +6,17 @@ from uuid import uuid4
 from typing import AsyncGenerator
 from config import settings
 
-engine = create_async_engine(settings.async_database_url, echo=False)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession,
-                                  expire_on_commit=False)
+try:
+    print("INFO: Initializing database engine...", flush=True)
+    engine = create_async_engine(settings.async_database_url, echo=False)
+    AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession,
+                                      expire_on_commit=False)
+    print("INFO: Database engine initialized.", flush=True)
+except Exception as e:
+    print("CRITICAL: Failed to initialize database engine!", flush=True)
+    import traceback
+    traceback.print_exc()
+    raise e
 
 class Base(DeclarativeBase): pass
 
