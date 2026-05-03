@@ -71,6 +71,239 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Premium landing page for Project Aether."""
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Aether Neural Brain | Operational</title>
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+        <style>
+            :root {{
+                --bg: #05070a;
+                --card-bg: rgba(13, 17, 23, 0.7);
+                --accent: #00f2ff;
+                --accent-dim: rgba(0, 242, 255, 0.2);
+                --text: #e6edf3;
+                --text-dim: #8b949e;
+                --success: #238636;
+            }}
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: 'Outfit', sans-serif;
+                background-color: var(--bg);
+                color: var(--text);
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                background-image: 
+                    radial-gradient(circle at 50% 50%, rgba(0, 242, 255, 0.05) 0%, transparent 50%),
+                    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+                background-size: 100% 100%, 40px 40px, 40px 40px;
+            }}
+            .container {{
+                width: 90%;
+                max-width: 800px;
+                background: var(--card-bg);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 24px;
+                padding: 40px;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                position: relative;
+                animation: fadeIn 1s ease-out;
+            }}
+            @keyframes fadeIn {{
+                from {{ opacity: 0; transform: translateY(20px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
+            .header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 40px;
+            }}
+            .logo-area h1 {{
+                font-size: 2.5rem;
+                font-weight: 700;
+                background: linear-gradient(90deg, #fff, var(--accent));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                letter-spacing: -1px;
+            }}
+            .logo-area p {{
+                color: var(--text-dim);
+                font-size: 1.1rem;
+                margin-top: 4px;
+            }}
+            .status-badge {{
+                background: var(--accent-dim);
+                border: 1px solid var(--accent);
+                color: var(--accent);
+                padding: 6px 12px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 700;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }}
+            .status-dot {{
+                width: 8px;
+                height: 8px;
+                background: var(--accent);
+                border-radius: 50%;
+                box-shadow: 0 0 10px var(--accent);
+                animation: pulse 2s infinite;
+            }}
+            @keyframes pulse {{
+                0% {{ opacity: 1; }}
+                50% {{ opacity: 0.4; }}
+                100% {{ opacity: 1; }}
+            }}
+            .terminal {{
+                background: #000;
+                border-radius: 12px;
+                padding: 20px;
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 0.9rem;
+                margin-bottom: 30px;
+                border-left: 4px solid var(--accent);
+            }}
+            .terminal-line {{ margin-bottom: 8px; display: flex; gap: 10px; }}
+            .prompt {{ color: var(--accent); }}
+            .stats-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 20px;
+                margin-bottom: 40px;
+            }}
+            .stat-card {{
+                background: rgba(255,255,255,0.03);
+                padding: 20px;
+                border-radius: 16px;
+                border: 1px solid rgba(255,255,255,0.05);
+            }}
+            .stat-card h4 {{ color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; margin-bottom: 8px; }}
+            .stat-card p {{ font-size: 1.2rem; font-weight: 700; }}
+            .actions {{
+                display: flex;
+                gap: 16px;
+            }}
+            .btn {{
+                flex: 1;
+                padding: 14px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 700;
+                text-align: center;
+                transition: all 0.2s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+            }}
+            .btn-primary {{
+                background: var(--accent);
+                color: #000;
+            }}
+            .btn-primary:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 10px 20px rgba(0, 242, 255, 0.3);
+            }}
+            .btn-secondary {{
+                background: rgba(255,255,255,0.05);
+                color: #fff;
+                border: 1px solid rgba(255,255,255,0.1);
+            }}
+            .btn-secondary:hover {{
+                background: rgba(255,255,255,0.1);
+                transform: translateY(-2px);
+            }}
+            .brain-bg {{
+                position: absolute;
+                top: -100px;
+                right: -100px;
+                width: 300px;
+                height: 300px;
+                background: var(--accent);
+                filter: blur(120px);
+                opacity: 0.1;
+                pointer-events: none;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="brain-bg"></div>
+        <div class="container">
+            <div class="header">
+                <div class="logo-area">
+                    <h1>AETHER BRAIN</h1>
+                    <p>Neural Orchestration Engine</p>
+                </div>
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    NEURAL LINK ACTIVE
+                </div>
+            </div>
+
+            <div class="terminal">
+                <div class="terminal-line">
+                    <span class="prompt">$</span>
+                    <span>initializing_kernel... <span style="color:var(--success)">DONE</span></span>
+                </div>
+                <div class="terminal-line">
+                    <span class="prompt">$</span>
+                    <span>checking_subsystems... <span style="color:var(--success)">OPTIMAL</span></span>
+                </div>
+                <div class="terminal-line">
+                    <span class="prompt">$</span>
+                    <span>environment: <span style="color:var(--accent)">{settings.environment}</span></span>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h4>Core Model</h4>
+                    <p>Gemini 1.5 Pro</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Memory</h4>
+                    <p>Active SQL Store</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Capacity</h4>
+                    <p>{settings.token_bucket_capacity} Units</p>
+                </div>
+                <div class="stat-card">
+                    <h4>Refill Rate</h4>
+                    <p>{settings.token_refill_rate}/s</p>
+                </div>
+            </div>
+
+            <div class="actions">
+                <a href="/docs" class="btn btn-primary">
+                    View API Documentation
+                </a>
+                <a href="/health" class="btn btn-secondary">
+                    System Health
+                </a>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
 print("INFO: All systems go. Starting FastAPI app...", flush=True)
 
 @app.get("/ping")
