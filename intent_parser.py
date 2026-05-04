@@ -32,7 +32,7 @@ class IntentParser:
             raise
 
     async def _generate_with_fallback(self, prompt: str, task_id: str) -> TaskPlan:
-        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-1.5-pro"]
         last_err = None
 
         for model_id in models_to_try:
@@ -49,8 +49,8 @@ class IntentParser:
                 return TaskPlan(**data)
             except Exception as e:
                 last_err = e
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    logger.warning(f"Model {model_id} exhausted (429). Trying next...")
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "404" in str(e):
+                    logger.warning(f"Model {model_id} failed ({str(e)[:50]}). Trying next...")
                     continue
                 raise e
         raise last_err
@@ -80,7 +80,7 @@ class IntentParser:
             }}
         }}
         """
-        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-1.5-pro"]
         for model_id in models_to_try:
             try:
                 response = self.client.models.generate_content(
@@ -92,8 +92,8 @@ class IntentParser:
                 )
                 return json.loads(response.text)
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    logger.warning(f"Model {model_id} exhausted (429). Trying next...")
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "404" in str(e):
+                    logger.warning(f"Model {model_id} failed. Trying next...")
                     continue
                 raise e
         raise last_err
