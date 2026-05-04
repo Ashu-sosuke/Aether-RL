@@ -1,129 +1,92 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, AliasGenerator
 from pydantic.alias_generators import to_camel
-from typing import Optional, List, Dict, Any
-from enum import Enum
-from uuid import uuid4
+from typing import List, Optional, Any
+import uuid
 
-class NodeData(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    nodeId               : str
-    className            : str
-    text                 : Optional[str] = None
-    contentDescription   : Optional[str] = None
-    viewIdResourceName   : Optional[str] = None
-    isClickable          : bool = False
-    isScrollable         : bool = False
-    isEditable           : bool = False
-    isVisible            : bool = True
-    boundsLeft           : int = 0
-    boundsTop            : int = 0
-    boundsRight          : int = 0
-    boundsBottom         : int = 0
-    depth                : int = 0
-    childCount           : int = 0
+# Base model to handle camelCase <-> snake_case automatically
+class AetherModel(BaseModel):
+    model_config = {
+        "alias_generator": to_camel,
+        "populate_by_name": True,
+        "from_attributes": True
+    }
 
-    def center_x(self) -> float: return (self.boundsLeft + self.boundsRight) / 2
-    def center_y(self) -> float: return (self.boundsTop + self.boundsBottom) / 2
-    
+# --- Action Models ---
+class NodeData(AetherModel):
+    node_id: str
+    class_name: str
+    text: Optional[str] = None
+    content_description: Optional[str] = None
+    view_id_resource_name: Optional[str] = None
+    is_clickable: bool = False
+    is_scrollable: bool = False
+    is_editable: bool = False
+    is_visible: bool = True
+    bounds_left: int = 0
+    bounds_top: int = 0
+    bounds_right: int = 0
+    bounds_bottom: int = 0
+    depth: int = 0
+    child_count: int = 0
+
     def to_text_repr(self) -> str:
-        parts = filter(None, [self.text, self.contentDescription,
-                               self.viewIdResourceName, self.className])
+        parts = [f"[{self.class_name}]"]
+        if self.text: parts.append(f"text='{self.text}'")
+        if self.content_description: parts.append(f"desc='{self.content_description}'")
+        if self.view_id_resource_name: parts.append(f"id='{self.view_id_resource_name}'")
+        parts.append(f"at({self.bounds_left},{self.bounds_top})")
         return " ".join(parts)
 
-class ActionType(str, Enum):
-    TAP        = "TAP"
-    LONG_TAP   = "LONG_TAP"
-    TYPE       = "TYPE"
-    SCROLL_UP  = "SCROLL_UP"
-    SCROLL_DOWN= "SCROLL_DOWN"
-    SWIPE      = "SWIPE"
-    BACK       = "BACK"
-    HOME       = "HOME"
+class ActionCommand(AetherModel):
+    action_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: str # tap, long_tap, scroll_up, scroll_down, type, swipe, back, home
+    node_id: Optional[str] = None
+    text: Optional[str] = None
+    x: Optional[float] = None
+    y: Optional[float] = None
+    x2: Optional[float] = None
+    y2: Optional[float] = None
 
-class ActionCommand(BaseModel):
-    actionId : str = Field(default_factory=lambda: str(uuid4()))
-    nodeId   : str
-    type     : ActionType
-    text     : Optional[str]  = None
-    x        : Optional[float]= None
-    y        : Optional[float]= None
-    x2       : Optional[float]= None
-    y2       : Optional[float]= None
+class TaskPlan(AetherModel):
+    task_id: str
+    goal: str
+    steps: List[str] = []
+    status: str = "pending"
+    context: dict = {}
 
-class PlannedStep(BaseModel):
-    stepId        : str = Field(default_factory=lambda: str(uuid4()))
-    description   : str
-    appPackage    : Optional[str] = None
-    requiresHitl  : bool = False
-    actionType    : ActionType = ActionType.TAP
-    inputText     : Optional[str] = None
+# --- WebSocket Inbound (from Android) ---
+class StartTaskPayload(AetherModel):
+    goal: str
+    user_id: str
 
-class TaskPlan(BaseModel):
-    taskId  : str = Field(default_factory=lambda: str(uuid4()))
-    goal    : str
-    steps   : List[PlannedStep]
-    context : Dict[str, Any] = {}
+class ObservationPayload(AetherModel):
+    nodes: List[NodeData]
+    active_package: str
+    screen_width: int
+    screen_height: int
 
-# --- WebSocket Message Schemas ---
+class AckPayload(AetherModel):
+    action_id: str
+    status: str
 
-# INBOUND (Android -> Server)
-class ObservationPayload(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    nodes         : List[NodeData]
-    activePackage : str
-    screenWidth   : int = 1080
-    screenHeight  : int = 1920
+class HitlResponsePayload(AetherModel):
+    approved: bool
 
-class AckPayload(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    actionId : str
-    status   : str   # "success" | "failed"
+class InboundMessage(AetherModel):
+    type: str  # start_task, observation, ack, hitl_response
+    task_id: str
+    payload: Any
 
-class HitlResponsePayload(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    approved : bool
+# --- WebSocket Outbound (to Android) ---
+class CommandPayload(AetherModel):
+    action: ActionCommand
+    thought: str
 
-class StartTaskPayload(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    goal   : str
-    userId : str = "user_default"
+class StatusPayload(AetherModel):
+    message: str
+    status: str
 
-class InboundMessage(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-        alias_generator=to_camel
-    )
-    type    : str
-    task_id : str = Field(alias="taskId")
-    payload : Dict[str, Any]
-
-# OUTBOUND (Server -> Android)
-class CommandPayload(BaseModel):
-    action : ActionCommand
-
-class HitlRequestPayload(BaseModel):
-    description : str
-
-class StatusPayload(BaseModel):
-    status  : str
-    message : str = ""
-
-class OutboundMessage(BaseModel):
-    type    : str
-    taskId  : str
-    payload : Dict[str, Any]
+class OutboundMessage(AetherModel):
+    type: str # command, status, task_complete, task_failed, hitl_request
+    task_id: str
+    payload: Any

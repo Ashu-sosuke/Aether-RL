@@ -36,7 +36,7 @@ class MemoryStore:
     async def log_task(self, task: TaskPlan, status: str, user_id: str):
         try:
             self.client.table("task_history").insert({
-                "task_id"   : str(task.taskId),
+                "task_id"   : str(task.task_id), # Updated from taskId
                 "user_id"   : user_id,
                 "goal"      : task.goal,
                 "status"    : status,

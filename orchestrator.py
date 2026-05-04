@@ -1,182 +1,138 @@
 import asyncio
-import json
-import uuid
-from fastapi import WebSocket
-from sqlalchemy.ext.asyncio import AsyncSession
-from models import TaskPlan, PlannedStep, NodeData, ActionCommand, ObservationPayload
+import logging
+from typing import Dict, Optional
+from models import TaskPlan, NodeData, ActionCommand, OutboundMessage, CommandPayload, StatusPayload
+from intent_parser import IntentParser
 from semantic_mapper import SemanticMapper
 from memory_store import MemoryStore
-from token_bucket import TokenBucket, ACTION_COST
-from safety import classify_step_risk, build_hitl_description
-from db import ActionLogEntry
+from config import settings
 
-# Module-level ack store shared across coroutines
-_ack_store: dict[str, str] = {}
+logger = logging.getLogger("AetherOrchestrator")
 
-class TaskOrchestrator:
-    def __init__(self,
-                 ws         : WebSocket,
-                 task       : TaskPlan,
-                 session_id : str,
-                 user_id    : str,
-                 mapper     : SemanticMapper,
-                 memory     : MemoryStore,
-                 bucket     : TokenBucket,
-                 db         : AsyncSession):
-        self.ws         = ws
-        self.task       = task
-        self.session_id = session_id
-        self.user_id    = user_id
-        self.mapper     = mapper
-        self.memory     = memory
-        self.bucket     = bucket
-        self.db         = db
-        self._obs_queue : asyncio.Queue[ObservationPayload] = asyncio.Queue(maxsize=1)
-        self._hitl_queue: asyncio.Queue[bool]               = asyncio.Queue(maxsize=1)
+class Orchestrator:
+    def __init__(self):
+        self.intent_parser = IntentParser()
+        self.semantic_mapper = SemanticMapper()
+        self.memory = MemoryStore()
+        
+        # Coroutine-safe event store for ACKs
+        self._ack_events: Dict[str, asyncio.Event] = {}
+        self._last_ack_status: Dict[str, str] = {}
+        
+        # Current observation for each task
+        self._current_nodes: Dict[str, list[NodeData]] = {}
+        self._current_app: Dict[str, str] = {}
+        self._observation_events: Dict[str, asyncio.Event] = {}
 
-    async def run(self) -> str:
-        """
-        Execute all steps in the task plan.
-        Returns final status: "completed" | "failed" | "aborted"
-        """
-        outcome = "completed"
-        for step in self.task.steps:
-            step_result = await self._execute_step(step)
-            if step_result == "aborted":
-                outcome = "aborted"
-                break
-            if step_result == "failed":
-                outcome = "failed"
-                break
-
-        await self._send({
-            "type"   : "task_complete" if outcome == "completed" else "task_failed",
-            "taskId" : self.task.taskId,
-            "payload": {"status": outcome, "message": ""}
-        })
-        await self.memory.log_task(self.task, outcome, self.user_id)
-        if outcome == "completed":
-            await self.memory.extract_and_save(
-                self.task, self.user_id, outcome)
-        return outcome
-
-    async def _execute_step(self, step: PlannedStep) -> str:
-        # -- STEP 1: OBSERVE --
-        await self._send({
-            "type"   : "status",
-            "taskId" : self.task.taskId,
-            "payload": {"status": "observing",
-                        "message": step.description}
-        })
-        obs = await self._wait_for_observation(timeout=10.0)
-        if obs is None:
-            return "failed"
-
-        # -- STEP 2: ANALYSE --
-        node = self.mapper.find_best_node(step.description, obs.nodes)
-        if node is None:
-            await self._log_action(step, None, obs.activePackage, "no_match")
-            return "failed"
-
-        # -- STEP 3: SAFETY CHECK --
-        is_risky = classify_step_risk(step, obs.activePackage) or step.requiresHitl
-        approved = True
-        if is_risky:
-            if not self.bucket.consume(ACTION_COST):
-                await self._send_token_error()
-                return "failed"
-            approved = await self._request_hitl(step, node)
-            if not approved:
-                await self._log_action(step, node, obs.activePackage, "hitl_denied")
-                return "aborted"
-
-        # -- STEP 4: EXECUTE --
-        if not self.bucket.consume(ACTION_COST):
-            await self._send_token_error()
-            return "failed"
-
-        command = ActionCommand(
-            nodeId = node.nodeId,
-            type   = step.actionType,
-            text   = step.inputText,
-            x      = node.center_x(),
-            y      = node.center_y()
-        )
-        await self._send({
-            "type"   : "command",
-            "taskId" : self.task.taskId,
-            "payload": {"action": command.model_dump()}
-        })
-
-        # Wait for ack
-        ack_status = await self._wait_for_ack(command.actionId, timeout=15.0)
-        status = "success" if ack_status == "success" else "failed"
-
-        # -- STEP 5: LOG --
-        await self._log_action(step, node, obs.activePackage, status,
-                                is_risky, approved if is_risky else None)
-
-        # Retry once on failure
-        if status == "failed":
-            await asyncio.sleep(1.0)
-            # return await self._execute_step(step) # simplified retry for demo
-            pass 
-
-        return "success" if status == "success" else "failed"
-
-    async def _wait_for_observation(self, timeout: float) -> ObservationPayload | None:
+    async def run_task(self, task: TaskPlan, websocket, user_id: str):
+        task_id = task.task_id
+        logger.info(f"Starting task loop: {task_id} - Goal: {task.goal}")
+        
         try:
-            return await asyncio.wait_for(self._obs_queue.get(), timeout)
-        except asyncio.TimeoutError:
-            return None
+            while task.status not in ["completed", "failed"]:
+                # 1. Wait for an observation (UI state) from the client
+                obs_event = self._observation_events.get(task_id)
+                if not obs_event:
+                    obs_event = asyncio.Event()
+                    self._observation_events[task_id] = obs_event
+                
+                try:
+                    logger.info(f"Task {task_id}: Waiting for observation...")
+                    await asyncio.wait_for(obs_event.wait(), timeout=settings.observation_timeout_seconds)
+                    obs_event.clear()
+                except asyncio.TimeoutError:
+                    logger.error(f"Task {task_id}: Observation timeout")
+                    await self._send_failed(websocket, task_id, "Observation timeout — is the app still running?")
+                    break
 
-    async def _wait_for_ack(self, action_id: str, timeout: float) -> str:
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
-            ack = _ack_store.get(action_id)
-            if ack:
-                del _ack_store[action_id]
-                return ack
-            await asyncio.sleep(0.1)
-        return "timeout"
+                # 2. Get LLM recommendation
+                nodes = self._current_nodes.get(task_id, [])
+                active_app = self._current_app.get(task_id, "unknown")
+                
+                logger.info(f"Task {task_id}: Consulting LLM...")
+                decision = await self.intent_parser.get_next_action(
+                    task.goal, task.steps, nodes, active_app
+                )
+                
+                thought = decision.get("thought", "Moving to next step")
+                action_data = decision.get("action")
+                
+                if not action_data or action_data.get("type") == "complete":
+                    task.status = "completed"
+                    await websocket.send_json(OutboundMessage(
+                        type= "task_complete",
+                        task_id= task_id,
+                        payload= StatusPayload(message="Goal achieved!", status="completed")
+                    ).model_dump(by_alias=True))
+                    break
 
-    async def _request_hitl(self, step: PlannedStep, node: NodeData) -> bool:
-        desc = build_hitl_description(step, node)
-        await self._send({
-            "type"   : "hitl_required",
-            "taskId" : self.task.taskId,
-            "payload": {"description": desc}
-        })
+                # 3. Map semantic node_id to physical nodeId if needed
+                cmd = ActionCommand(**action_data)
+                if cmd.node_id and not cmd.node_id.startswith("physical_"):
+                    # Use semantic mapper to find the best match in the current tree
+                    best_node = self.semantic_mapper.find_best_node(cmd.node_id, nodes)
+                    if best_node:
+                        logger.info(f"Mapped semantic ID '{cmd.node_id}' -> '{best_node.node_id}'")
+                        cmd.node_id = best_node.node_id
+                    else:
+                        logger.warning(f"Could not map semantic ID: {cmd.node_id}")
+
+                # 4. Send command to Android
+                logger.info(f"Task {task_id}: Sending action {cmd.type} - {thought}")
+                await websocket.send_json(OutboundMessage(
+                    type= "command",
+                    task_id= task_id,
+                    payload= CommandPayload(action=cmd, thought=thought)
+                ).model_dump(by_alias=True))
+
+                # 5. Wait for ACK
+                ack_status = await self._wait_for_ack(task_id, cmd.action_id)
+                if ack_status == "failed":
+                    logger.warning(f"Task {task_id}: Action failed on device")
+                    # Optionally retry or adjust strategy
+                
+                # Small delay to let UI settle
+                await asyncio.sleep(1.0)
+
+        except Exception as e:
+            logger.error(f"Task {task_id} crashed: {e}", exc_info=True)
+            await self._send_failed(websocket, task_id, f"Internal Orchestrator Error: {str(e)}")
+        finally:
+            self.cleanup_task(task_id)
+
+    async def _wait_for_ack(self, task_id: str, action_id: str) -> str:
+        event = asyncio.Event()
+        self._ack_events[action_id] = event
         try:
-            return await asyncio.wait_for(self._hitl_queue.get(), timeout=60.0)
+            await asyncio.wait_for(event.wait(), timeout=15.0)
+            return self._last_ack_status.get(action_id, "unknown")
         except asyncio.TimeoutError:
-            return False   # auto-deny on timeout
+            return "timeout"
+        finally:
+            self._ack_events.pop(action_id, None)
+            self._last_ack_status.pop(action_id, None)
 
-    async def _send(self, data: dict):
-        await self.ws.send_text(json.dumps(data))
+    def update_observation(self, task_id: str, nodes: list[NodeData], active_package: str):
+        self._current_nodes[task_id] = nodes
+        self._current_app[task_id] = active_package
+        if task_id in self._observation_events:
+            self._observation_events[task_id].set()
 
-    async def _send_token_error(self):
-        reset_in = self.bucket.reset_at_seconds()
-        await self._send({
-            "type"   : "token_exhausted",
-            "taskId" : self.task.taskId,
-            "payload": {
-                "status" : "error",
-                "message": f"Token limit reached. Resets in {reset_in:.0f}s"
-            }
-        })
+    def handle_ack(self, action_id: str, status: str):
+        self._last_ack_status[action_id] = status
+        if action_id in self._ack_events:
+            self._ack_events[action_id].set()
 
-    async def _log_action(self, step, node, package, status,
-                           hitl_req=False, hitl_approved=None):
-        entry = ActionLogEntry(
-            task_id       = uuid.UUID(self.task.taskId),
-            step_id       = step.stepId,
-            action_type   = step.actionType.value,
-            node_id       = node.nodeId if node else None,
-            app_package   = package,
-            status        = status,
-            hitl_required = hitl_req,
-            hitl_approved = hitl_approved
-        )
-        self.db.add(entry)
-        await self.db.commit()
+    async def _send_failed(self, websocket, task_id: str, message: str):
+        try:
+            await websocket.send_json(OutboundMessage(
+                type="task_failed",
+                task_id=task_id,
+                payload=StatusPayload(message=message, status="failed")
+            ).model_dump(by_alias=True))
+        except: pass
+
+    def cleanup_task(self, task_id: str):
+        self._current_nodes.pop(task_id, None)
+        self._current_app.pop(task_id, None)
+        self._observation_events.pop(task_id, None)

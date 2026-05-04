@@ -1,148 +1,71 @@
 import asyncio
+import logging
 import json
-import traceback
-from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import ValidationError
-from models import (
-    InboundMessage, StartTaskPayload, ObservationPayload, 
-    AckPayload, HitlResponsePayload, TaskPlan
-)
-from token_bucket import TokenBucket
-from orchestrator import TaskOrchestrator, _ack_store
-from intent_parser import IntentParser
-from semantic_mapper import SemanticMapper
+from models import InboundMessage, StartTaskPayload, ObservationPayload, AckPayload, HitlResponsePayload
+from orchestrator import Orchestrator
 from memory_store import MemoryStore
-from config import settings
 
-# Singletons shared between REST and WebSocket
-parser = IntentParser()
-mapper = SemanticMapper()
+logger = logging.getLogger("AetherWS")
+
+# Global orchestrator instance
+orchestrator = Orchestrator()
 memory = MemoryStore()
 
-class SessionContext:
-    def __init__(self, session_id: str, ws: WebSocket, bucket: TokenBucket, orchestrator=None, task_plan=None, user_id="user_default"):
-        self.session_id    = session_id
-        self.ws            = ws
-        self.user_id       = user_id
-        self.bucket        = bucket
-        self.orchestrator: TaskOrchestrator | None = orchestrator
-        self.task_plan: TaskPlan | None = task_plan
-
-# Registry of active sessions
-sessions: dict[str, SessionContext] = {}
-
-async def handle_websocket(ws: WebSocket, db: AsyncSession, session_id: str):
-    # Register session FIRST before any await
-    sessions[session_id] = SessionContext(
-        session_id=session_id,
-        ws=ws,
-        bucket=TokenBucket(
-            capacity=settings.token_bucket_capacity,
-            refill_rate=settings.token_refill_rate
-        ),
-        orchestrator=None,
-        task_plan=None,
-        user_id="user_default"
-    )
-    print(f"[WS] Session registered: {session_id}")
+async def handle_websocket(websocket: WebSocket, db: AsyncSession):
+    await websocket.accept()
+    session_id = str(id(websocket))
+    logger.info(f"WebSocket connected: {session_id}")
+    
+    active_tasks = set()
 
     try:
-        async for raw in ws.iter_text():
-            print(f"[WS RECV] session={session_id} raw={raw[:200]}")
+        while True:
+            data = await websocket.receive_text()
             try:
-                msg = InboundMessage.model_validate_json(raw)
-                await _handle_message(session_id, msg, db)
-            except ValidationError as e:
-                print(f"[WS] Pydantic validation failed: {e}")
+                # 1. Parse Inbound Message
+                msg_dict = json.loads(data)
+                msg = InboundMessage(**msg_dict)
+                
+                # 2. Route by type
+                if msg.type == "start_task":
+                    payload = StartTaskPayload(**msg.payload)
+                    task_id = msg.task_id
+                    
+                    logger.info(f"Received start_task: {task_id} for goal: {payload.goal}")
+                    
+                    # Initialize task state via IntentParser
+                    task_plan = await orchestrator.intent_parser.parse_goal(payload.goal, task_id)
+                    
+                    # Log to database
+                    await memory.log_task(task_plan, "started", payload.user_id)
+                    
+                    # Start orchestration loop in background
+                    active_tasks.add(task_id)
+                    asyncio.create_task(orchestrator.run_task(task_plan, websocket, payload.user_id))
+                
+                elif msg.type == "observation":
+                    payload = ObservationPayload(**msg.payload)
+                    orchestrator.update_observation(msg.task_id, payload.nodes, payload.active_package)
+                
+                elif msg.type == "ack":
+                    payload = AckPayload(**msg.payload)
+                    orchestrator.handle_ack(payload.action_id, payload.status)
+                
+                elif msg.type == "hitl_response":
+                    # Future implementation for Human-In-The-Loop
+                    pass
+
             except Exception as e:
-                import traceback
-                print(f"[WS] Message handler error: {type(e).__name__}: {e}")
-                traceback.print_exc()
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                # Don't crash the loop, just log and keep going
+
     except WebSocketDisconnect:
-        raise
+        logger.info(f"WebSocket disconnected: {session_id}")
     except Exception as e:
-        print(f"[WS] Receive loop crashed: {type(e).__name__}: {e}")
-        raise
+        logger.error(f"WebSocket session error: {e}", exc_info=True)
     finally:
-        sessions.pop(session_id, None)
-
-async def _handle_message(
-    session_id: str, 
-    msg: InboundMessage, 
-    db: AsyncSession
-):
-    session = sessions.get(session_id)
-    if not session:
-        print(f"[WS] Error: Message received for unknown session {session_id}")
-        return
-
-    if msg.type == "start_task":
-        try:
-            payload = StartTaskPayload(**msg.payload)
-            session.user_id = payload.userId
-            print(f"[WS] Starting task for user={payload.userId}: {payload.goal}")
-            
-            # Get user memory context safely
-            memory_ctx = {}
-            try:
-                memory_ctx = await memory.get_context(payload.userId)
-            except Exception as e:
-                print(f"[WS] Warning: Failed to load memory context: {e}")
-            
-            # Parse goal into a task plan
-            try:
-                task_plan = await parser.parse_goal(payload.goal, memory_ctx)
-                # Sync taskId with the one from the client
-                task_plan.taskId = msg.task_id
-                session.task_plan = task_plan
-            except Exception as e:
-                print(f"[WS] Error: Failed to parse goal: {e}")
-                await session.ws.send_json({
-                    "type": "status",
-                    "taskId": msg.task_id,
-                    "payload": {"status": "error", "message": f"Parse failed: {str(e)}"}
-                })
-                return
-            
-            # Initialize and start orchestrator
-            orch = TaskOrchestrator(
-                ws         = session.ws,
-                task       = task_plan,
-                session_id = session.session_id,
-                user_id    = payload.userId,
-                mapper     = mapper,
-                memory     = memory,
-                bucket     = session.bucket,
-                db         = db
-            )
-            session.orchestrator = orch
-            asyncio.create_task(orch.run())
-        except Exception as e:
-            print(f"[WS] Critical error starting task: {e}")
-            traceback.print_exc()
-            await session.ws.send_json({
-                "type": "status",
-                "taskId": msg.task_id,
-                "payload": {"status": "error", "message": f"Startup failed: {str(e)}"}
-            })
-
-    elif msg.type == "observation":
-        payload = ObservationPayload(**msg.payload)
-        if session.orchestrator:
-            # Clear queue if full, then put new observation
-            try:
-                session.orchestrator._obs_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            await session.orchestrator._obs_queue.put(payload)
-
-    elif msg.type == "ack":
-        payload = AckPayload(**msg.payload)
-        _ack_store[payload.actionId] = payload.status
-
-    elif msg.type == "hitl_response":
-        payload = HitlResponsePayload(**msg.payload)
-        if session.orchestrator:
-            await session.orchestrator._hitl_queue.put(payload.approved)
+        # Cleanup any tasks associated with this connection if possible
+        for tid in active_tasks:
+            orchestrator.cleanup_task(tid)

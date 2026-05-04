@@ -5,7 +5,7 @@ from models import NodeData
 from typing import List, Tuple
 
 class SemanticMapper:
-    THRESHOLD = 0.55
+    THRESHOLD = 0.40  # Lowered for better discovery (Bug 4.3)
     TOP_K     = 3
 
     def __init__(self):
@@ -48,10 +48,11 @@ class SemanticMapper:
         if best_score >= self.THRESHOLD:
             return nodes[best_idx]
 
-        # Below threshold — ask LLM to pick from top-3 candidates
-        top_indices = np.argsort(scores)[::-1][:self.TOP_K]
-        candidates  = [(nodes[i], float(scores[i])) for i in top_indices]
-        return self._llm_fallback(intent, candidates)
+        # Below threshold — fallback to highest score if it's reasonable
+        if best_score > 0.30:
+            return nodes[best_idx]
+            
+        return None
 
     def _embed(self, text: str) -> np.ndarray:
         if text not in self._cache:
@@ -60,22 +61,8 @@ class SemanticMapper:
                 contents=text,
                 config={"task_type": "RETRIEVAL_QUERY"}
             )
-            # Response returns a list of embeddings if contents is a list, 
-            # or a single embedding if contents is a string.
-            # For a single string, it's response.embeddings[0] or response.embedding
-            # Actually, for google-genai, if contents is a string, response.embeddings is a list with one item.
             self._cache[text] = np.array(response.embeddings[0].values)
             
             if len(self._cache) > 512:   # LRU eviction
                 self._cache.pop(next(iter(self._cache)))
         return self._cache[text]
-
-    def _llm_fallback(self, intent: str,
-                       candidates: List[Tuple[NodeData, float]]
-                       ) -> NodeData | None:
-        if not candidates:
-            return None
-        best_node, best_score = candidates[0]
-        if best_score > 0.30:
-            return best_node
-        return None   # truly no match
