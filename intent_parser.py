@@ -1,3 +1,4 @@
+import asyncio
 from google import genai
 import openai
 import json
@@ -13,9 +14,10 @@ class IntentParser:
     async def parse_goal(self, goal: str, memory_context: dict) -> TaskPlan:
         prompt = self._build_prompt(goal, memory_context)
 
-        # Try Gemini first
+        # Try Gemini first using to_thread to avoid blocking the event loop
         try:
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model_id,
                 contents=prompt
             )
@@ -26,7 +28,7 @@ class IntentParser:
             if not self._fallback:
                 raise RuntimeError("Gemini failed and no OpenAI API key provided for fallback.")
 
-        # Fallback to GPT-4o
+        # Fallback to GPT-4o (already async)
         try:
             resp = await self._fallback.chat.completions.create(
                 model="gpt-4o",
@@ -76,7 +78,16 @@ Rules:
 """
 
     def _parse_response(self, raw: str, goal: str) -> TaskPlan:
-        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```")
+        # Robust parsing for various markdown fence variants
+        clean = raw.strip()
+        if clean.startswith("```"):
+            lines = clean.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            clean = "\n".join(lines).strip()
+            
         data  = json.loads(clean)
         steps = [PlannedStep(**s) for s in data.get("steps", [])]
         return TaskPlan(

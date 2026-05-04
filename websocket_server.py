@@ -1,5 +1,6 @@
 import asyncio
 import json
+import traceback
 from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,21 +35,31 @@ async def handle_websocket(
 ):
     session_id = str(uuid4())
     session = SessionContext(session_id, ws)
+    print(f"DEBUG: New connection attempt. Assigning session_id: {session_id}")
+    
     await ws.accept()
+    print(f"DEBUG: Session {session_id} accepted.")
     sessions[session_id] = session
     
     try:
         async for raw in ws.iter_text():
+            print(f"DEBUG: Session {session_id} received raw message: {raw[:100]}...")
             try:
                 data = json.loads(raw)
                 msg = InboundMessage(**data)
+                print(f"DEBUG: Session {session_id} processing message type: {msg.type}")
                 await _handle_message(session, msg, db, parser, mapper, memory)
             except Exception as e:
-                print(f"Error handling message in session {session_id}: {e}")
+                print(f"ERROR handling message in session {session_id}: {e}")
+                traceback.print_exc()
                 
     except WebSocketDisconnect:
-        print(f"Session {session_id} disconnected")
+        print(f"INFO: Session {session_id} disconnected by client (WebSocketDisconnect)")
+    except Exception as e:
+        print(f"CRITICAL error in session {session_id} loop: {e}")
+        traceback.print_exc()
     finally:
+        print(f"DEBUG: Cleaning up session {session_id}")
         sessions.pop(session_id, None)
 
 async def _handle_message(
