@@ -3,7 +3,7 @@ from fastapi import FastAPI, Depends, WebSocket, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db, init_db
+from db import get_db, init_db
 from websocket_server import handle_websocket
 from config import settings
 import time
