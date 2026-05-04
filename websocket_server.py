@@ -4,6 +4,7 @@ import traceback
 from uuid import uuid4
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import ValidationError
 from models import (
     InboundMessage, StartTaskPayload, ObservationPayload, 
     AckPayload, HitlResponsePayload, TaskPlan
@@ -13,63 +14,70 @@ from orchestrator import TaskOrchestrator, _ack_store
 from intent_parser import IntentParser
 from semantic_mapper import SemanticMapper
 from memory_store import MemoryStore
+from config import settings
+
+# Singletons shared between REST and WebSocket
+parser = IntentParser()
+mapper = SemanticMapper()
+memory = MemoryStore()
 
 class SessionContext:
-    def __init__(self, session_id: str, ws: WebSocket):
+    def __init__(self, session_id: str, ws: WebSocket, bucket: TokenBucket, orchestrator=None, task_plan=None, user_id="user_default"):
         self.session_id    = session_id
         self.ws            = ws
-        self.user_id: str | None = None
-        self.bucket        = TokenBucket()
-        self.orchestrator: TaskOrchestrator | None = None
-        self.task_plan: TaskPlan | None = None
+        self.user_id       = user_id
+        self.bucket        = bucket
+        self.orchestrator: TaskOrchestrator | None = orchestrator
+        self.task_plan: TaskPlan | None = task_plan
 
 # Registry of active sessions
 sessions: dict[str, SessionContext] = {}
 
-async def handle_websocket(
-    ws: WebSocket, 
-    db: AsyncSession, 
-    parser: IntentParser, 
-    mapper: SemanticMapper, 
-    memory: MemoryStore
-):
-    session_id = str(uuid4())
-    session = SessionContext(session_id, ws)
-    print(f"DEBUG: New connection attempt. Assigning session_id: {session_id}")
-    
-    await ws.accept()
-    print(f"DEBUG: Session {session_id} accepted.")
-    sessions[session_id] = session
-    
+async def handle_websocket(ws: WebSocket, db: AsyncSession, session_id: str):
+    # Register session FIRST before any await
+    sessions[session_id] = SessionContext(
+        session_id=session_id,
+        ws=ws,
+        bucket=TokenBucket(
+            capacity=settings.token_bucket_capacity,
+            refill_rate=settings.token_refill_rate
+        ),
+        orchestrator=None,
+        task_plan=None,
+        user_id="user_default"
+    )
+    print(f"[WS] Session registered: {session_id}")
+
     try:
         async for raw in ws.iter_text():
-            print(f"DEBUG: Session {session_id} received raw message: {raw[:100]}...")
+            print(f"[WS RECV] session={session_id} raw={raw[:200]}")
             try:
-                data = json.loads(raw)
-                msg = InboundMessage(**data)
-                print(f"DEBUG: Session {session_id} processing message type: {msg.type}")
-                await _handle_message(session, msg, db, parser, mapper, memory)
+                msg = InboundMessage.model_validate_json(raw)
+                await _handle_message(session_id, msg, db)
+            except ValidationError as e:
+                print(f"[WS] Pydantic validation failed: {e}")
             except Exception as e:
-                print(f"ERROR handling message in session {session_id}: {e}")
+                import traceback
+                print(f"[WS] Message handler error: {type(e).__name__}: {e}")
                 traceback.print_exc()
-                
     except WebSocketDisconnect:
-        print(f"INFO: Session {session_id} disconnected by client (WebSocketDisconnect)")
+        raise
     except Exception as e:
-        print(f"CRITICAL error in session {session_id} loop: {e}")
-        traceback.print_exc()
+        print(f"[WS] Receive loop crashed: {type(e).__name__}: {e}")
+        raise
     finally:
-        print(f"DEBUG: Cleaning up session {session_id}")
         sessions.pop(session_id, None)
 
 async def _handle_message(
-    session: SessionContext, 
+    session_id: str, 
     msg: InboundMessage, 
-    db: AsyncSession,
-    parser: IntentParser, 
-    mapper: SemanticMapper, 
-    memory: MemoryStore
+    db: AsyncSession
 ):
+    session = sessions.get(session_id)
+    if not session:
+        print(f"[WS] Error: Message received for unknown session {session_id}")
+        return
+
     if msg.type == "start_task":
         payload = StartTaskPayload(**msg.payload)
         session.user_id = payload.userId

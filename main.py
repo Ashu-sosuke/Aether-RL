@@ -2,9 +2,11 @@ import sys
 print("DEBUG: main.py reached", flush=True)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from uuid import uuid4
 import uuid
 
 import traceback
@@ -16,15 +18,12 @@ try:
     print(f"INFO: Environment: {settings.environment}")
     
     print("INFO: Importing modules...")
-    from db import engine, Base, get_db, ActionLogEntry
-    from intent_parser import IntentParser
-    from semantic_mapper import SemanticMapper
-    from memory_store import MemoryStore
-    from websocket_server import handle_websocket, sessions
+    from db import engine, Base, get_db, ActionLogEntry, AsyncSessionLocal
+    # Import singletons from websocket_server to avoid duplication
+    from websocket_server import handle_websocket, sessions, parser, mapper, memory
     print("INFO: Modules imported successfully.")
 except Exception as e:
     print("CRITICAL: Error during module-level imports/init")
-    # If it's a Pydantic ValidationError, it's likely missing env vars
     if "ValidationError" in str(type(e)):
         print("ERROR: Missing or invalid Environment Variables!")
     traceback.print_exc()
@@ -56,26 +55,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Project Aether — Neural Brain", lifespan=lifespan)
 
-# Singletons
-print("INFO: Initializing Singletons (Parser, Mapper, Memory)...", flush=True)
-try:
-    parser  = IntentParser()
-    print("INFO: IntentParser initialized.", flush=True)
-    mapper  = SemanticMapper()
-    print("INFO: SemanticMapper initialized.", flush=True)
-    memory  = MemoryStore()
-    print("INFO: MemoryStore initialized.", flush=True)
-except Exception as e:
-    print("CRITICAL: Failed to initialize singletons!", flush=True)
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-
-from fastapi.responses import HTMLResponse
-
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    """Premium landing page for Project Aether."""
+    """Health-check compatible root endpoint with premium UI."""
+    # If it's a HEAD request, just return status ok
+    # (FastAPI handles the body removal automatically, but let's be explicit if needed)
+    
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -304,22 +289,42 @@ async def root():
     """
     return HTMLResponse(content=html_content)
 
-print("INFO: All systems go. Starting FastAPI app...", flush=True)
-
-@app.get("/ping")
+@app.api_route("/ping", methods=["GET", "HEAD"])
 async def ping():
     """Simple ping for health checks."""
-    return {"status": "ok"}
+    return JSONResponse({"status": "ok"})
 
 @app.get("/health")
 async def health():
     """Detailed health check."""
-    return {"status": "healthy", "environment": settings.environment}
+    return {
+        "status"     : "healthy",
+        "environment": settings.environment,
+        "version"    : "1.0.0"
+    }
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket, db: AsyncSession = Depends(get_db)):
-    """Main WebSocket entry point for Android clients."""
-    await handle_websocket(ws, db, parser, mapper, memory)
+async def websocket_endpoint(ws: WebSocket):
+    """Main WebSocket entry point with crash protection."""
+    await ws.accept()
+    session_id = str(uuid4())
+    print(f"[WS] New connection — session {session_id}")
+    try:
+        async with AsyncSessionLocal() as db:
+            await handle_websocket(ws, db, session_id)
+    except WebSocketDisconnect:
+        print(f"[WS] Client disconnected — session {session_id}")
+    except Exception as e:
+        import traceback
+        print(f"[WS CRASH] session {session_id}: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        try:
+            await ws.close(code=1011)
+        except Exception:
+            pass
+    finally:
+        sessions.pop(session_id, None)
+        print(f"[WS] Session cleaned up — {session_id}")
 
 @app.post("/task")
 async def create_task(body: dict, db: AsyncSession = Depends(get_db)):

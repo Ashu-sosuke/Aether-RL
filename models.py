@@ -1,9 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic.alias_generators import to_camel
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from uuid import uuid4
 
 class NodeData(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     nodeId               : str
     className            : str
     text                 : Optional[str] = None
@@ -66,25 +71,45 @@ class TaskPlan(BaseModel):
 
 # INBOUND (Android -> Server)
 class ObservationPayload(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     nodes         : List[NodeData]
     activePackage : str
     screenWidth   : int = 1080
     screenHeight  : int = 1920
 
 class AckPayload(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     actionId : str
     status   : str   # "success" | "failed"
 
 class HitlResponsePayload(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     approved : bool
 
 class StartTaskPayload(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     goal   : str
     userId : str = "user_default"
 
 class InboundMessage(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     type    : str
-    taskId  : str
+    task_id : str = Field(alias="taskId")
     payload : Dict[str, Any]
 
 # OUTBOUND (Server -> Android)
