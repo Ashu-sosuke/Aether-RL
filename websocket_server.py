@@ -59,7 +59,17 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
-                # Don't crash the loop, just log and keep going
+                # Notify client if it was a task-related error
+                try:
+                    if 'msg' in locals() and msg.task_id:
+                        from models import OutboundMessage, StatusPayload
+                        await websocket.send_json(OutboundMessage(
+                            type="task_failed",
+                            task_id=msg.task_id,
+                            payload=StatusPayload(message=f"Server Error: {str(e)}", status="failed")
+                        ).model_dump(by_alias=True))
+                except:
+                    pass
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {session_id}")

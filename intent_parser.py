@@ -25,24 +25,42 @@ class IntentParser:
             "context": {{}}
         }}
         """
-        response = self.client.models.generate_content(
-            model=self.model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-        data = json.loads(response.text)
-        # Ensure task_id matches what we generated
-        data["task_id"] = task_id
-        return TaskPlan(**data)
+        try:
+            return await self._generate_with_fallback(prompt, task_id)
+        except Exception as e:
+            logger.error(f"IntentParser: Failed to parse goal: {e}")
+            raise
+
+    async def _generate_with_fallback(self, prompt: str, task_id: str) -> TaskPlan:
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        last_err = None
+
+        for model_id in models_to_try:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                data = json.loads(response.text)
+                data["task_id"] = task_id
+                return TaskPlan(**data)
+            except Exception as e:
+                last_err = e
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    logger.warning(f"Model {model_id} exhausted (429). Trying next...")
+                    continue
+                raise e
+        raise last_err
 
     async def get_next_action(self, 
                              goal: str, 
                              steps: list, 
                              nodes: list, 
                              active_app: str) -> dict:
-        node_context = "\n".join([n.to_text_repr() for n in nodes[:50]]) # Limit to 50 nodes for context
+        node_context = "\n".join([n.to_text_repr() for n in nodes[:50]])
         
         prompt = f"""
         Task: {goal}
@@ -54,19 +72,28 @@ class IntentParser:
         Based on the UI tree, determine the single next best action.
         Return ONLY a JSON object:
         {{
-            "thought": "I need to click the search bar to find the video",
+            "thought": "description",
             "action": {{
                 "type": "tap",
-                "node_id": "com.google.android.youtube:id/search_edit_text",
+                "node_id": "id",
                 "text": null
             }}
         }}
         """
-        response = self.client.models.generate_content(
-            model=self.model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
-        return json.loads(response.text)
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
+        for model_id in models_to_try:
+            try:
+                response = self.client.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    logger.warning(f"Model {model_id} exhausted (429). Trying next...")
+                    continue
+                raise e
+        raise last_err
