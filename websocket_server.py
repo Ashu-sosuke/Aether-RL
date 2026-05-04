@@ -99,7 +99,7 @@ async def _handle_message(
                 print(f"[WS] Error: Failed to parse goal: {e}")
                 await session.ws.send_json({
                     "type": "status",
-                    "taskId": msg.taskId,
+                    "taskId": msg.task_id,
                     "payload": {"status": "error", "message": f"Parse failed: {str(e)}"}
                 })
                 return
@@ -122,7 +122,7 @@ async def _handle_message(
             traceback.print_exc()
             await session.ws.send_json({
                 "type": "status",
-                "taskId": msg.taskId,
+                "taskId": msg.task_id,
                 "payload": {"status": "error", "message": f"Startup failed: {str(e)}"}
             })
 

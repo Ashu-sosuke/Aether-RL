@@ -8,7 +8,7 @@ from models import TaskPlan, PlannedStep
 class IntentParser:
     def __init__(self):
         self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.model_id = "gemini-1.5-pro"
+        self.model_id = "gemini-1.5-flash"
         self._fallback = openai.AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
 
     async def parse_goal(self, goal: str, memory_context: dict) -> TaskPlan:
