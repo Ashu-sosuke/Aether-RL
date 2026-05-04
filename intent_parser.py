@@ -32,7 +32,14 @@ class IntentParser:
             raise
 
     async def _generate_with_fallback(self, prompt: str, task_id: str) -> TaskPlan:
-        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-1.5-pro"]
+        import asyncio
+        # Try latest aliases which often resolve 404s in v1beta
+        models_to_try = [
+            "gemini-2.0-flash", 
+            "gemini-1.5-flash", 
+            "gemini-1.5-flash-latest", 
+            "gemini-1.5-pro-latest"
+        ]
         last_err = None
 
         for model_id in models_to_try:
@@ -49,8 +56,10 @@ class IntentParser:
                 return TaskPlan(**data)
             except Exception as e:
                 last_err = e
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "404" in str(e):
-                    logger.warning(f"Model {model_id} failed ({str(e)[:50]}). Trying next...")
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "404" in err_str:
+                    logger.warning(f"Model {model_id} failed ({err_str[:50]}). Trying next in 1s...")
+                    await asyncio.sleep(1) # Small delay to respect rate limits
                     continue
                 raise e
         raise last_err
@@ -80,7 +89,12 @@ class IntentParser:
             }}
         }}
         """
-        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash-002", "gemini-1.5-flash", "gemini-1.5-pro"]
+        models_to_try = [
+            "gemini-2.0-flash", 
+            "gemini-1.5-flash", 
+            "gemini-1.5-flash-latest", 
+            "gemini-1.5-pro-latest"
+        ]
         for model_id in models_to_try:
             try:
                 response = self.client.models.generate_content(
@@ -92,8 +106,10 @@ class IntentParser:
                 )
                 return json.loads(response.text)
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "404" in str(e):
-                    logger.warning(f"Model {model_id} failed. Trying next...")
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "404" in err_str:
+                    logger.warning(f"Model {model_id} failed. Trying next in 1s...")
+                    await asyncio.sleep(1)
                     continue
                 raise e
         raise last_err
