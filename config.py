@@ -13,9 +13,12 @@ class Settings:
         self.gemini_api_key = self._get_required("GEMINI_API_KEY")
         self.gemini_models = [
             model.strip()
-            for model in os.getenv("GEMINI_MODELS", "gemini-2.5-flash,gemini-2.0-flash").split(",")
+            for model in os.getenv("GEMINI_MODELS", "gemini-2.0-flash,gemini-1.5-flash-002,gemini-1.5-flash").split(",")
             if model.strip()
         ]
+        self.nvidia_api_key = os.getenv("NVIDIA_API_KEY", "")
+        self.nvidia_model   = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-8b-omni")
+        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
         # Database

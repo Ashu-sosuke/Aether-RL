@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Dict, Optional
 from models import TaskPlan, NodeData, ActionCommand, OutboundMessage, CommandPayload, StatusPayload
-from intent_parser import IntentParser
+from intent_parser import IntentParser, GeminiGenerationError
 from semantic_mapper import SemanticMapper
 from memory_store import MemoryStore
 from config import settings
@@ -96,7 +96,7 @@ class Orchestrator:
 
         except Exception as e:
             logger.error(f"Task {task_id} crashed: {e}", exc_info=True)
-            await self._send_failed(websocket, task_id, f"Internal Orchestrator Error: {str(e)}")
+            await self._send_failed(websocket, task_id, self._user_facing_error(e))
         finally:
             self.cleanup_task(task_id)
 
@@ -131,6 +131,11 @@ class Orchestrator:
                 payload=StatusPayload(message=message, status="failed")
             ).model_dump(by_alias=True))
         except: pass
+
+    def _user_facing_error(self, error: Exception) -> str:
+        if isinstance(error, GeminiGenerationError):
+            return str(error)
+        return f"Internal Orchestrator Error: {str(error)}"
 
     def cleanup_task(self, task_id: str):
         self._current_nodes.pop(task_id, None)
