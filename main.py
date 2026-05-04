@@ -56,6 +56,7 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
 
 @app.get("/ui", response_class=HTMLResponse)
 async def admin_ui():
+    configured_models = ", ".join(settings.gemini_models)
     return """
     <html>
         <head>
@@ -71,12 +72,12 @@ async def admin_ui():
             <div class="card">
                 <h1>Aether Brain v2.0</h1>
                 <p>Status: <span class="status-on">OPERATIONAL</span></p>
-                <p>LLM: <b>gemini-2.0-flash</b></p>
+                <p>LLM fallback: <b>__CONFIGURED_MODELS__</b></p>
                 <p>Environment: <b>production</b></p>
             </div>
         </body>
     </html>
-    """
+    """.replace("__CONFIGURED_MODELS__", configured_models)
 
 # --- Global Exception Handler ---
 

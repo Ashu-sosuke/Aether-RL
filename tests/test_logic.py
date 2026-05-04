@@ -9,13 +9,14 @@ from models import NodeData
 async def test_parse_goal_returns_valid_plan():
     parser = IntentParser()
     mock_response = MagicMock()
-    mock_response.text = '{"steps": [{"description": "test step", "actionType": "TAP"}], "context": {}}'
+    mock_response.text = '{"goal": "do something", "steps": ["test step"], "context": {}}'
     
     with patch("asyncio.to_thread", return_value=mock_response):
-        plan = await parser.parse_goal("do something", {})
+        plan = await parser.parse_goal("do something", "task-1")
         assert plan.goal == "do something"
+        assert plan.task_id == "task-1"
         assert len(plan.steps) == 1
-        assert plan.steps[0].description == "test step"
+        assert plan.steps[0] == "test step"
 
 @pytest.mark.asyncio
 async def test_parse_response_strips_markdown():

@@ -11,6 +11,11 @@ class Settings:
         print("INFO: Loading environment variables...", flush=True)
         # LLM
         self.gemini_api_key = self._get_required("GEMINI_API_KEY")
+        self.gemini_models = [
+            model.strip()
+            for model in os.getenv("GEMINI_MODELS", "gemini-2.5-flash,gemini-2.0-flash").split(",")
+            if model.strip()
+        ]
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
         # Database
