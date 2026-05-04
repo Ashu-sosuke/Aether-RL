@@ -5,7 +5,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from models import InboundMessage, StartTaskPayload, ObservationPayload, AckPayload, HitlResponsePayload
 from orchestrator import Orchestrator
-from intent_parser import GeminiGenerationError
 from memory_store import MemoryStore
 
 logger = logging.getLogger("AetherWS")
@@ -67,7 +66,7 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                         await websocket.send_json(OutboundMessage(
                             type="task_failed",
                             task_id=msg.task_id,
-                            payload=StatusPayload(message=_user_facing_error(e), status="failed")
+                            payload=StatusPayload(message=f"Server Error: {str(e)}", status="failed")
                         ).model_dump(by_alias=True))
                 except:
                     pass
@@ -80,9 +79,3 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
         # Cleanup any tasks associated with this connection if possible
         for tid in active_tasks:
             orchestrator.cleanup_task(tid)
-
-
-def _user_facing_error(error: Exception) -> str:
-    if isinstance(error, GeminiGenerationError):
-        return str(error)
-    return f"Server Error: {str(error)}"
