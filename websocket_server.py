@@ -79,27 +79,52 @@ async def _handle_message(
         return
 
     if msg.type == "start_task":
-        payload = StartTaskPayload(**msg.payload)
-        session.user_id = payload.userId
-        memory_ctx = await memory.get_context(payload.userId)
-        
-        # Parse goal into a task plan
-        task_plan = await parser.parse_goal(payload.goal, memory_ctx)
-        session.task_plan = task_plan
-        
-        # Initialize and start orchestrator
-        orch = TaskOrchestrator(
-            ws         = session.ws,
-            task       = task_plan,
-            session_id = session.session_id,
-            user_id    = payload.userId,
-            mapper     = mapper,
-            memory     = memory,
-            bucket     = session.bucket,
-            db         = db
-        )
-        session.orchestrator = orch
-        asyncio.create_task(orch.run())
+        try:
+            payload = StartTaskPayload(**msg.payload)
+            session.user_id = payload.userId
+            print(f"[WS] Starting task for user={payload.userId}: {payload.goal}")
+            
+            # Get user memory context safely
+            memory_ctx = {}
+            try:
+                memory_ctx = await memory.get_context(payload.userId)
+            except Exception as e:
+                print(f"[WS] Warning: Failed to load memory context: {e}")
+            
+            # Parse goal into a task plan
+            try:
+                task_plan = await parser.parse_goal(payload.goal, memory_ctx)
+                session.task_plan = task_plan
+            except Exception as e:
+                print(f"[WS] Error: Failed to parse goal: {e}")
+                await session.ws.send_json({
+                    "type": "status",
+                    "taskId": msg.taskId,
+                    "payload": {"status": "error", "message": f"Parse failed: {str(e)}"}
+                })
+                return
+            
+            # Initialize and start orchestrator
+            orch = TaskOrchestrator(
+                ws         = session.ws,
+                task       = task_plan,
+                session_id = session.session_id,
+                user_id    = payload.userId,
+                mapper     = mapper,
+                memory     = memory,
+                bucket     = session.bucket,
+                db         = db
+            )
+            session.orchestrator = orch
+            asyncio.create_task(orch.run())
+        except Exception as e:
+            print(f"[WS] Critical error starting task: {e}")
+            traceback.print_exc()
+            await session.ws.send_json({
+                "type": "status",
+                "taskId": msg.taskId,
+                "payload": {"status": "error", "message": f"Startup failed: {str(e)}"}
+            })
 
     elif msg.type == "observation":
         payload = ObservationPayload(**msg.payload)

@@ -74,6 +74,23 @@ class SessionRecord(Base):
     disconnected_at = Column(DateTime(timezone=True), nullable=True)
     token_balance   = Column(Integer, default=100)
 
+class UserMemory(Base):
+    __tablename__ = "user_memory"
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    user_id     = Column(String(128), index=True)
+    key         = Column(String(128), index=True)
+    value       = Column(String)
+    updated_at  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+class TaskHistory(Base):
+    __tablename__ = "task_history"
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    task_id     = Column(GUID, index=True)
+    user_id     = Column(String(128), index=True)
+    goal        = Column(String)
+    status      = Column(String(32))
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
