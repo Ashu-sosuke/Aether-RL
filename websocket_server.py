@@ -94,6 +94,8 @@ async def _handle_message(
             # Parse goal into a task plan
             try:
                 task_plan = await parser.parse_goal(payload.goal, memory_ctx)
+                # Sync taskId with the one from the client
+                task_plan.taskId = msg.task_id
                 session.task_plan = task_plan
             except Exception as e:
                 print(f"[WS] Error: Failed to parse goal: {e}")
