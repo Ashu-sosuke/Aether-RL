@@ -5,6 +5,7 @@ from models import TaskPlan
 import json
 import logging
 import asyncio
+import openai
 
 logger = logging.getLogger("AetherIntent")
 
@@ -18,8 +19,15 @@ class GeminiGenerationError(RuntimeError):
 
 class IntentParser:
     def __init__(self):
-        self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.models_to_try = settings.gemini_models
+        self.gemini_client = genai.Client(api_key=settings.gemini_api_key)
+        self.groq_client = None
+        if settings.groq_api_key and settings.groq_api_key != "gsk_placeholder_replace_me":
+            self.groq_client = openai.AsyncOpenAI(
+                api_key=settings.groq_api_key,
+                base_url=settings.groq_base_url
+            )
+        self.gemini_models = settings.gemini_models
+        self.primary_model = settings.primary_model
 
     async def parse_goal(self, goal: str, task_id: str) -> TaskPlan:
         prompt = f"""
@@ -73,14 +81,29 @@ class IntentParser:
         return await self._generate_json_with_fallback(prompt)
 
     async def _generate_json_with_fallback(self, prompt: str) -> dict:
+        # 1. Try Groq (Primary)
+        if self.groq_client:
+            try:
+                logger.info(f"Consulting Groq ({self.primary_model})...")
+                response = await self.groq_client.chat.completions.create(
+                    model=self.primary_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"}
+                )
+                return self._parse_json_response(response.choices[0].message.content)
+            except Exception as e:
+                logger.warning(f"Groq API failed: {e}. Falling back to Gemini.")
+
+        # 2. Try Gemini Fallbacks
         last_err = None
         saw_retryable_error = False
         saw_model_not_found = False
 
-        for model_id in self.models_to_try:
+        for model_id in self.gemini_models:
             try:
+                logger.info(f"Consulting Gemini ({model_id})...")
                 response = await asyncio.to_thread(
-                    self.client.models.generate_content,
+                    self.gemini_client.models.generate_content,
                     model=model_id,
                     contents=prompt,
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
@@ -100,7 +123,7 @@ class IntentParser:
                     continue
                 raise
 
-        configured = ", ".join(self.models_to_try)
+        configured = ", ".join(self.gemini_models)
         if saw_retryable_error:
             raise GeminiGenerationError(
                 "Gemini API quota is exhausted or temporarily rate-limited. "

@@ -17,6 +17,9 @@ class Settings:
             if model.strip()
         ]
         self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
+        self.groq_api_key   = os.getenv("GROQ_API_KEY", "")
+        self.groq_base_url  = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        self.primary_model  = os.getenv("PRIMARY_MODEL", "openai/gpt-oss-120b")
 
         # Database
         self.database_url   = self._get_required("DATABASE_URL")

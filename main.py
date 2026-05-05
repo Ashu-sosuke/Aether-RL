@@ -38,7 +38,8 @@ async def root():
     return {
         "status": "online",
         "service": "Aether Neural Brain",
-        "version": "2.0.0-gemini-flash",
+        "version": "2.1.0-gpt-oss",
+        "primary_model": settings.primary_model,
         "timestamp": time.time()
     }
 
@@ -56,7 +57,8 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
 
 @app.get("/ui", response_class=HTMLResponse)
 async def admin_ui():
-    configured_models = ", ".join(settings.gemini_models)
+    primary = settings.primary_model
+    fallbacks = ", ".join(settings.gemini_models)
     return """
     <html>
         <head>
@@ -70,14 +72,15 @@ async def admin_ui():
         </head>
         <body>
             <div class="card">
-                <h1>Aether Brain v2.0</h1>
+                <h1>Aether Brain v2.1</h1>
                 <p>Status: <span class="status-on">OPERATIONAL</span></p>
-                <p>LLM fallback: <b>__CONFIGURED_MODELS__</b></p>
+                <p>Primary LLM: <b>__PRIMARY__</b></p>
+                <p>Fallback Chain: <b>__FALLBACKS__</b></p>
                 <p>Environment: <b>production</b></p>
             </div>
         </body>
     </html>
-    """.replace("__CONFIGURED_MODELS__", configured_models)
+    """.replace("__PRIMARY__", primary).replace("__FALLBACKS__", fallbacks)
 
 # --- Global Exception Handler ---
 
