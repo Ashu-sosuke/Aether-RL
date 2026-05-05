@@ -15,6 +15,9 @@ class Orchestrator:
         self.semantic_mapper = SemanticMapper()
         self.memory = MemoryStore()
         
+        # Track active asyncio Tasks for cancellation
+        self._running_tasks: Dict[str, asyncio.Task] = {}
+        
         # Coroutine-safe event store for ACKs
         self._ack_events: Dict[str, asyncio.Event] = {}
         self._last_ack_status: Dict[str, str] = {}
@@ -26,6 +29,7 @@ class Orchestrator:
 
     async def run_task(self, task: TaskPlan, websocket, user_id: str):
         task_id = task.task_id
+        self._running_tasks[task_id] = asyncio.current_task()
         logger.info(f"Starting task loop: {task_id} - Goal: {task.goal}")
         
         try:
@@ -94,10 +98,14 @@ class Orchestrator:
                 # Small delay to let UI settle
                 await asyncio.sleep(1.0)
 
+        except asyncio.CancelledError:
+            logger.info(f"Task {task_id} was cancelled")
+            await self._send_failed(websocket, task_id, "Task stopped by user")
         except Exception as e:
             logger.error(f"Task {task_id} crashed: {e}", exc_info=True)
             await self._send_failed(websocket, task_id, f"Internal Orchestrator Error: {str(e)}")
         finally:
+            self._running_tasks.pop(task_id, None)
             self.cleanup_task(task_id)
 
     async def _wait_for_ack(self, task_id: str, action_id: str) -> str:
@@ -136,3 +144,9 @@ class Orchestrator:
         self._current_nodes.pop(task_id, None)
         self._current_app.pop(task_id, None)
         self._observation_events.pop(task_id, None)
+
+    def stop_task(self, task_id: str):
+        if task_id in self._running_tasks:
+            self._running_tasks[task_id].cancel()
+            return True
+        return False

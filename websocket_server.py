@@ -56,6 +56,10 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                 elif msg.type == "hitl_response":
                     # Future implementation for Human-In-The-Loop
                     pass
+                
+                elif msg.type == "stop_task":
+                    logger.info(f"Received stop_task for: {msg.task_id}")
+                    orchestrator.stop_task(msg.task_id)
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)
