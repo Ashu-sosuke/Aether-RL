@@ -3,6 +3,7 @@ from config import settings
 from models import TaskPlan
 import json
 import traceback
+from datetime import datetime
 
 class MemoryStore:
     def __init__(self):
@@ -36,14 +37,15 @@ class MemoryStore:
     async def log_task(self, task: TaskPlan, status: str, user_id: str):
         try:
             self.client.table("task_history").insert({
-                "task_id"   : str(task.task_id), # Updated from taskId
+                "task_id"   : str(task.task_id),
                 "user_id"   : user_id,
                 "goal"      : task.goal,
                 "status"    : status,
-                "created_at": "now()"
+                "created_at": datetime.utcnow().isoformat()
             }).execute()
         except Exception as e:
-            print(f"MemoryStore: Error logging task: {e}")
+            # Log but never crash the task over a DB write failure
+            print(f"[MemoryStore] log_task failed (non-fatal): {e}")
 
     async def extract_and_save(self, task: TaskPlan, user_id: str, outcome: str):
         try:
