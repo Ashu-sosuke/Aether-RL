@@ -25,6 +25,7 @@ class Orchestrator:
         # Current observation for each task
         self._current_nodes: Dict[str, list[NodeData]] = {}
         self._current_app: Dict[str, str] = {}
+        self._current_screenshot: Dict[str, Optional[str]] = {}
         self._observation_events: Dict[str, asyncio.Event] = {}
 
     async def run_task(self, task: TaskPlan, websocket, user_id: str):
@@ -37,7 +38,7 @@ class Orchestrator:
                 # Create a fresh event for this observation wait (Bug 5)
                 obs_event = asyncio.Event()
                 self._observation_events[task_id] = obs_event
-                if self._current_nodes.get(task_id):
+                if self._current_nodes.get(task_id) or self._current_screenshot.get(task_id):
                     obs_event.set()
                 
                 try:
@@ -55,10 +56,11 @@ class Orchestrator:
                 # 2. Get LLM recommendation
                 nodes = self._current_nodes.get(task_id, [])
                 active_app = self._current_app.get(task_id, "unknown")
+                screenshot = self._current_screenshot.get(task_id)
                 
-                logger.info(f"Task {task_id}: Consulting LLM...")
+                logger.info(f"Task {task_id}: Consulting LLM (Vision: {screenshot is not None})...")
                 decision = await self.intent_parser.get_next_action(
-                    task.goal, task.steps, nodes, active_app
+                    task.goal, task.steps, nodes, active_app, screenshot
                 )
                 
                 thought = decision.get("thought", "Moving to next step")
@@ -133,9 +135,12 @@ class Orchestrator:
             self._ack_events.pop(action_id, None)
             self._last_ack_status.pop(action_id, None)
 
-    def update_observation(self, task_id: str, nodes: list[NodeData], active_package: str):
+    def update_observation(self, task_id: str, nodes: list[NodeData], active_package: str, screenshot: Optional[str] = None):
         self._current_nodes[task_id] = nodes
         self._current_app[task_id] = active_package
+        if screenshot:
+            self._current_screenshot[task_id] = screenshot
+            
         if task_id in self._observation_events:
             self._observation_events[task_id].set()
 
@@ -156,6 +161,7 @@ class Orchestrator:
     def cleanup_task(self, task_id: str):
         self._current_nodes.pop(task_id, None)
         self._current_app.pop(task_id, None)
+        self._current_screenshot.pop(task_id, None)
         self._observation_events.pop(task_id, None)
 
     def stop_task(self, task_id: str):

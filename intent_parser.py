@@ -17,6 +17,8 @@ class GeminiGenerationError(RuntimeError):
     """Raised when every configured Gemini model fails for a user-facing reason."""
 
 
+import base64
+
 class IntentParser:
     def __init__(self):
         self.gemini_client = genai.Client(api_key=settings.gemini_api_key)
@@ -57,9 +59,16 @@ class IntentParser:
                              goal: str, 
                              steps: list, 
                              nodes: list, 
-                             active_app: str) -> dict:
+                             active_app: str,
+                             screenshot: Optional[str] = None) -> dict:
         node_context = "\n".join([n.to_text_repr() for n in nodes[:50]])
         
+        vision_instruction = ""
+        if screenshot and not nodes:
+            vision_instruction = "IMPORTANT: UI Tree is empty/unavailable. Use the provided screenshot to determine the next action. Return 'x' and 'y' coordinates (relative to screen width/height) for the tap."
+        elif screenshot:
+            vision_instruction = "A screenshot is provided for visual context. Use it alongside the UI Tree."
+
         prompt = f"""
         Task: {goal}
         Remaining Steps: {steps}
@@ -67,28 +76,35 @@ class IntentParser:
         UI Tree:
         {node_context}
 
-        Based on the UI tree, determine the single next best action.
+        {vision_instruction}
+
+        Determine the single next best action.
+        If using a node from the UI Tree, specify "node_id".
+        If using vision (screenshot), specify "x" and "y" as absolute pixel coordinates based on the screen dimensions.
+        
         Return ONLY a JSON object:
         {{
             "thought": "description",
             "action": {{
                 "type": "tap",
-                "node_id": "id",
+                "node_id": "id or null",
+                "x": null,
+                "y": null,
                 "text": null
             }}
         }}
         """
-        return await self._generate_json_with_fallback(prompt)
+        return await self._generate_json_with_fallback(prompt, screenshot)
 
-    async def _generate_json_with_fallback(self, prompt: str) -> dict:
-        # 1. Try Groq (Primary)
-        if self.groq_client:
+    async def _generate_json_with_fallback(self, prompt: str, screenshot: Optional[str] = None) -> dict:
+        # 1. Try Groq (Primary) - Only if no screenshot (Groq is text-only usually)
+        if self.groq_client and not screenshot:
             try:
                 logger.info(f"Consulting Groq ({self.primary_model})...")
                 response = await self.groq_client.chat.completions.create(
                     model=self.primary_model,
                     messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"}
+                    # format not supported on some groq models, but typically we want it
                 )
                 return self._parse_json_response(response.choices[0].message.content)
             except Exception as e:
@@ -99,13 +115,24 @@ class IntentParser:
         saw_retryable_error = False
         saw_model_not_found = False
 
+        # Prepare Gemini content (multimodal if screenshot exists)
+        contents = [prompt]
+        if screenshot:
+            try:
+                contents.append(types.Part.from_bytes(
+                    data=base64.b64decode(screenshot),
+                    mime_type="image/jpeg"
+                ))
+            except Exception as e:
+                logger.error(f"Failed to decode screenshot: {e}")
+
         for model_id in self.gemini_models:
             try:
-                logger.info(f"Consulting Gemini ({model_id})...")
+                logger.info(f"Consulting Gemini ({model_id}) - Vision: {screenshot is not None}...")
                 response = await asyncio.to_thread(
                     self.gemini_client.models.generate_content,
                     model=model_id,
-                    contents=prompt,
+                    contents=contents,
                     config=types.GenerateContentConfig(response_mime_type="application/json"),
                 )
                 return self._parse_json_response(response.text)

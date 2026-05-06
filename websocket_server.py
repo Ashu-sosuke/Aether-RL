@@ -50,7 +50,12 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                 
                 elif msg.type == "observation":
                     payload = ObservationPayload(**msg.payload)
-                    orchestrator.update_observation(msg.task_id, payload.nodes, payload.active_package)
+                    orchestrator.update_observation(
+                        msg.task_id, 
+                        payload.nodes, 
+                        payload.active_package,
+                        payload.screenshot
+                    )
                 
                 elif msg.type == "ack":
                     payload = AckPayload(**msg.payload)

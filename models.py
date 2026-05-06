@@ -68,6 +68,7 @@ class ObservationPayload(AetherModel):
     active_package: str
     screen_width: int
     screen_height: int
+    screenshot: Optional[str] = None # Base64 JPEG
 
 class AckPayload(AetherModel):
     action_id: str
