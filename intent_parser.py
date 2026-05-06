@@ -2,6 +2,7 @@ from google import genai
 from google.genai import types
 from config import settings
 from models import TaskPlan
+from typing import Optional
 import json
 import logging
 import asyncio
