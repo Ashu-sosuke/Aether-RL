@@ -80,8 +80,15 @@ class IntentParser:
         {vision_instruction}
 
         Determine the single next best action.
-        If using a node from the UI Tree, specify "node_id".
-        If using vision (screenshot), specify "x" and "y" as absolute pixel coordinates based on the screen dimensions.
+        
+        Action Types:
+        - tap: Tap on a node or coordinates.
+        - long_tap: Long tap on a node or coordinates.
+        - type: Type text into a node.
+        - scroll_up / scroll_down: Scroll the screen.
+        - open_app: Launch an app directly. Provide package name in "text" field (e.g. "com.google.android.youtube" for YouTube).
+        - open_url: Open a URL or Deep Link. Provide URL in "text" field (e.g. "https://youtube.com").
+        - back / home: System navigation.
         
         Return ONLY a JSON object:
         {{

@@ -43,7 +43,7 @@ class ActionCommand(AetherModel):
         alias_generator=to_camel
     )
     action_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    type: str # tap, long_tap, scroll_up, scroll_down, type, swipe, back, home
+    type: str # tap, long_tap, scroll_up, scroll_down, type, swipe, back, home, open_app, open_url
     node_id: Optional[str] = None
     text: Optional[str] = None
     x: Optional[float] = None
