@@ -34,19 +34,20 @@ class Orchestrator:
         
         try:
             while task.status not in ["completed", "failed"]:
-                # 1. Wait for an observation (UI state) from the client
-                obs_event = self._observation_events.get(task_id)
-                if not obs_event:
-                    obs_event = asyncio.Event()
-                    self._observation_events[task_id] = obs_event
+                # Create a fresh event for this observation wait (Bug 5)
+                obs_event = asyncio.Event()
+                self._observation_events[task_id] = obs_event
                 
                 try:
                     logger.info(f"Task {task_id}: Waiting for observation...")
-                    await asyncio.wait_for(obs_event.wait(), timeout=settings.observation_timeout_seconds)
-                    obs_event.clear()
+                    await asyncio.wait_for(
+                        obs_event.wait(), 
+                        timeout=settings.observation_timeout_seconds
+                    )
                 except asyncio.TimeoutError:
                     logger.error(f"Task {task_id}: Observation timeout")
-                    await self._send_failed(websocket, task_id, "Observation timeout — is the app still running?")
+                    await self._send_failed(websocket, task_id, 
+                        "Observation timeout — is the accessibility service running?")
                     break
 
                 # 2. Get LLM recommendation
@@ -62,11 +63,22 @@ class Orchestrator:
                 action_data = decision.get("action")
                 
                 if not action_data or action_data.get("type") == "complete":
+                    # Wait briefly for any in-flight ack to arrive (Bug 6)
+                    await asyncio.sleep(1.5)
                     task.status = "completed"
+                    
+                    try:
+                        await self.memory.log_completed_task(task, "completed", user_id)
+                    except Exception as e:
+                        print(f"[Orchestrator] Memory log failed (non-fatal): {e}")
+
                     await websocket.send_json(OutboundMessage(
                         type= "task_complete",
                         task_id= task_id,
-                        payload= StatusPayload(message="Goal achieved!", status="completed")
+                        payload= StatusPayload(
+                            message="Goal achieved!", 
+                            status="completed"
+                        )
                     ).model_dump(by_alias=True))
                     break
 
@@ -93,7 +105,6 @@ class Orchestrator:
                 ack_status = await self._wait_for_ack(task_id, cmd.action_id)
                 if ack_status == "failed":
                     logger.warning(f"Task {task_id}: Action failed on device")
-                    # Optionally retry or adjust strategy
                 
                 # Small delay to let UI settle
                 await asyncio.sleep(1.0)

@@ -40,8 +40,10 @@ class Settings:
         self.token_refill_rate     = float(os.getenv("TOKEN_REFILL_RATE", "10.0"))
 
         # Timeouts (Bug 5)
-        self.observation_timeout_seconds = float(os.getenv("OBSERVATION_TIMEOUT", "30.0"))
-        self.hitl_timeout_seconds        = float(os.getenv("HITL_TIMEOUT", "120.0"))
+        self.observation_timeout_seconds = float(
+            os.getenv("OBSERVATION_TIMEOUT", "30.0"))
+        self.hitl_timeout_seconds = float(
+            os.getenv("HITL_TIMEOUT", "120.0"))
 
         print(f"INFO: Config loaded. Environment: {self.environment}", flush=True)
 
@@ -84,9 +86,4 @@ class Settings:
         ]
         return urlunsplit(parsed._replace(query=urlencode(query_items)))
 
-try:
-    settings = Settings()
-except Exception as e:
-    print(f"CRITICAL: Settings initialization failed: {e}", flush=True)
-    import sys
-    sys.exit(1)
+settings = Settings()

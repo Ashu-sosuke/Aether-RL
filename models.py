@@ -1,15 +1,15 @@
-from pydantic import BaseModel, Field, AliasGenerator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from typing import List, Optional, Any
 import uuid
 
 # Base model to handle camelCase <-> snake_case automatically
 class AetherModel(BaseModel):
-    model_config = {
-        "alias_generator": to_camel,
-        "populate_by_name": True,
-        "from_attributes": True
-    }
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True
+    )
 
 # --- Action Models ---
 class NodeData(AetherModel):
@@ -38,6 +38,10 @@ class NodeData(AetherModel):
         return " ".join(parts)
 
 class ActionCommand(AetherModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     action_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     type: str # tap, long_tap, scroll_up, scroll_down, type, swipe, back, home
     node_id: Optional[str] = None
@@ -79,14 +83,33 @@ class InboundMessage(AetherModel):
 
 # --- WebSocket Outbound (to Android) ---
 class CommandPayload(AetherModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     action: ActionCommand
     thought: str
 
 class StatusPayload(AetherModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     message: str
     status: str
 
+class HitlRequestPayload(AetherModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
+    description: str
+
 class OutboundMessage(AetherModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel
+    )
     type: str # command, status, task_complete, task_failed, hitl_request
     task_id: str
     payload: Any

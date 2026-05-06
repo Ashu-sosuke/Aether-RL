@@ -20,7 +20,7 @@ class MemoryStore:
                 .execute()
             return {row["key"]: row["value"] for row in (result.data or [])}
         except Exception as e:
-            print(f"MemoryStore: Error fetching context for {user_id}: {e}")
+            print(f"[MemoryStore] get_context failed (non-fatal): {e}")
             return {}
 
     async def set_memory(self, user_id: str, key: str, value: str):
@@ -32,7 +32,7 @@ class MemoryStore:
                 "updated_at": "now()"
             }).execute()
         except Exception as e:
-            print(f"MemoryStore: Error setting memory: {e}")
+            print(f"[MemoryStore] set_memory failed (non-fatal): {e}")
 
     async def log_task(self, task: TaskPlan, status: str, user_id: str):
         try:
@@ -44,8 +44,19 @@ class MemoryStore:
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
         except Exception as e:
-            # Log but never crash the task over a DB write failure
             print(f"[MemoryStore] log_task failed (non-fatal): {e}")
+
+    async def log_completed_task(self, task: TaskPlan, status: str, user_id: str):
+        try:
+            self.client.table("task_history").insert({
+                "task_id"   : str(task.task_id),
+                "user_id"   : user_id,
+                "goal"      : task.goal,
+                "status"    : status,
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as e:
+            print(f"[MemoryStore] log_completed_task failed (non-fatal): {e}")
 
     async def extract_and_save(self, task: TaskPlan, user_id: str, outcome: str):
         try:
@@ -65,4 +76,4 @@ class MemoryStore:
                     ctx["upi_id"]
                 )
         except Exception as e:
-            print(f"MemoryStore: Error in extract_and_save: {e}")
+            print(f"[MemoryStore] extract_and_save failed (non-fatal): {e}")

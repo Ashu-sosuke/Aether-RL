@@ -39,7 +39,10 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                     task_plan = await orchestrator.intent_parser.parse_goal(payload.goal, task_id)
                     
                     # Log to database
-                    await memory.log_task(task_plan, "started", payload.user_id)
+                    try:
+                        await memory.log_task(task_plan, "started", payload.user_id)
+                    except Exception as e:
+                        print(f"[WS] Memory log failed (non-fatal): {e}")
                     
                     # Start orchestration loop in background
                     active_tasks.add(task_id)
@@ -58,8 +61,10 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                     pass
                 
                 elif msg.type == "stop_task":
-                    logger.info(f"Received stop_task for: {msg.task_id}")
-                    orchestrator.stop_task(msg.task_id)
+                    # Bug 8: Added handler for stop_task
+                    task_id = msg.task_id
+                    stopped = orchestrator.stop_task(task_id)
+                    print(f"[WS] Task {task_id} stopped: {stopped}")
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}", exc_info=True)

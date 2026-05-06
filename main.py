@@ -33,19 +33,13 @@ async def startup_event():
 
 # --- Health Checks (Bug 10) ---
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
-    return {
-        "status": "online",
-        "service": "Aether Neural Brain",
-        "version": "2.1.0-gpt-oss",
-        "primary_model": settings.primary_model,
-        "timestamp": time.time()
-    }
+    return JSONResponse({"status": "ok"})
 
-@app.get("/ping")
+@app.api_route("/ping", methods=["GET", "HEAD"])
 async def ping():
-    return "pong"
+    return JSONResponse({"status": "ok", "service": "aether-brain"})
 
 # --- WebSocket ---
 
