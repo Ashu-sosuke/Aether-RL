@@ -27,6 +27,8 @@ class Orchestrator:
         self._current_app: Dict[str, str] = {}
         self._current_screenshot: Dict[str, Optional[str]] = {}
         self._observation_events: Dict[str, asyncio.Event] = {}
+        self._blind_events: Dict[str, str] = {}
+        self._retry_counts: Dict[str, int] = {}
 
     async def run_task(self, task: TaskPlan, websocket, user_id: str):
         task_id = task.task_id
@@ -53,7 +55,30 @@ class Orchestrator:
                         "Observation timeout — is the accessibility service running?")
                     break
 
-                # 2. Get LLM recommendation
+                # 2. Check for blind state
+                if task_id in self._blind_events:
+                    reason = self._blind_events.get(task_id, "unknown")
+                    logger.warning(f"Task {task_id}: Agent is blind: {reason}")
+                    self._retry_counts[task_id] = self._retry_counts.get(task_id, 0) + 1
+                    wait = min(2 ** self._retry_counts[task_id], 30)
+                    await asyncio.sleep(wait)
+                    
+                    # Try navigating home before re-attempting
+                    logger.info(f"Task {task_id}: Attempting global HOME to recover from blind state")
+                    cmd = ActionCommand(type="home")
+                    await websocket.send_json(OutboundMessage(
+                        type="command",
+                        task_id=task_id,
+                        payload=CommandPayload(action=cmd, thought=f"Device observation blocked ({reason}). Navigating Home to recover.")
+                    ).model_dump(by_alias=True))
+                    
+                    # Clear blind state to wait for next observation
+                    self._blind_events.pop(task_id, None)
+                    continue
+                
+                self._retry_counts[task_id] = 0
+
+                # 3. Get LLM recommendation
                 nodes = self._current_nodes.get(task_id, [])
                 active_app = self._current_app.get(task_id, "unknown")
                 screenshot = self._current_screenshot.get(task_id)
@@ -135,7 +160,12 @@ class Orchestrator:
             self._ack_events.pop(action_id, None)
             self._last_ack_status.pop(action_id, None)
 
-    def update_observation(self, task_id: str, nodes: list[NodeData], active_package: str, screenshot: Optional[str] = None):
+    def update_observation(self, task_id: str, nodes: list[NodeData], active_package: str, screenshot: Optional[str] = None, type: str = "observation", reason: Optional[str] = None):
+        if type == "blind":
+            self._blind_events[task_id] = reason or "unknown"
+        else:
+            self._blind_events.pop(task_id, None)
+            
         self._current_nodes[task_id] = nodes
         self._current_app[task_id] = active_package
         if screenshot:
@@ -163,6 +193,8 @@ class Orchestrator:
         self._current_app.pop(task_id, None)
         self._current_screenshot.pop(task_id, None)
         self._observation_events.pop(task_id, None)
+        self._blind_events.pop(task_id, None)
+        self._retry_counts.pop(task_id, None)
 
     def stop_task(self, task_id: str):
         if task_id in self._running_tasks:

@@ -54,7 +54,9 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
                         msg.task_id, 
                         payload.nodes, 
                         payload.active_package,
-                        payload.screenshot
+                        payload.screenshot,
+                        payload.type,
+                        payload.reason
                     )
                 
                 elif msg.type == "ack":
