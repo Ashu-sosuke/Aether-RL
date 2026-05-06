@@ -41,7 +41,7 @@ class Settings:
 
         # Timeouts (Bug 5)
         self.observation_timeout_seconds = float(
-            os.getenv("OBSERVATION_TIMEOUT", "30.0"))
+            os.getenv("OBSERVATION_TIMEOUT", "60.0"))
         self.hitl_timeout_seconds = float(
             os.getenv("HITL_TIMEOUT", "120.0"))
 
