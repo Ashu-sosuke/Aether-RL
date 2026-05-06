@@ -154,6 +154,10 @@ class Orchestrator:
                 if ack_status == "failed":
                     logger.warning(f"Task {task_id}: Action failed on device")
                 
+                # Clear observation state to force waiting for a fresh update in the next loop
+                self._current_nodes.pop(task_id, None)
+                self._current_screenshot.pop(task_id, None)
+                
                 # Small delay to let UI settle
                 await asyncio.sleep(1.0)
 
