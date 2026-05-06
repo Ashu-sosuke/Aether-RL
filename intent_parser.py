@@ -61,46 +61,50 @@ class IntentParser:
                              steps: list, 
                              nodes: list, 
                              active_app: str,
+                             history: list = [],
+                             screenshot_description: Optional[str] = None,
                              screenshot: Optional[str] = None) -> dict:
         node_context = "\n".join([n.to_text_repr() for n in nodes[:50]])
         
-        vision_instruction = ""
-        if screenshot and not nodes:
-            vision_instruction = "IMPORTANT: UI Tree is empty/unavailable. Use the provided screenshot to determine the next action. Return 'x' and 'y' coordinates (relative to screen width/height) for the tap."
-        elif screenshot:
-            vision_instruction = "A screenshot is provided for visual context. Use it alongside the UI Tree."
-
         prompt = f"""
-        Task: {goal}
-        Remaining Steps: {steps}
-        Active App: {active_app}
-        UI Tree:
-        {node_context}
+### ROLE
+You are the "Aether Brain," the central intelligence of an autonomous Android agent. Your goal is to complete complex user tasks by interacting with the Android UI via an Accessibility Service.
 
-        {vision_instruction}
+### INPUT DATA
+1. USER_GOAL: {goal}
+2. UI_TREE:
+{node_context}
+3. SCREENSHOT_DESCRIPTION: {screenshot_description or "N/A"}
+4. ACTION_HISTORY: {history}
 
-        Determine the single next best action.
-        
-        Action Types:
-        - tap: Tap on a node or coordinates.
-        - long_tap: Long tap on a node or coordinates.
-        - type: Type text into a node.
-        - scroll_up / scroll_down: Scroll the screen.
-        - open_app: Launch an app directly. Provide package name in "text" field (e.g. "com.google.android.youtube" for YouTube).
-        - open_url: Open a URL or Deep Link. Provide URL in "text" field (e.g. "https://youtube.com").
-        - back / home: System navigation.
-        
-        Return ONLY a JSON object:
-        {{
-            "thought": "description",
-            "action": {{
-                "type": "tap",
-                "node_id": "id or null",
-                "x": null,
-                "y": null,
-                "text": null
-            }}
-        }}
+### OPERATIONAL RULES
+1. REASONING: Before acting, analyze the screen. Does the current screen match the task goal? 
+2. STEP-BY-STEP: Only perform ONE action per turn. 
+3. HIERARCHY: 
+   - Prefer Direct Intent (e.g., Opening an app directly).
+   - Use Resource IDs if available.
+   - Use Text labels if IDs are missing.
+   - Use Coordinates (X, Y) if the UI tree is empty/null.
+4. SELF-HEALING: If an action failed in the history, try a different approach (e.g., scroll down or go back).
+
+### ACTION SCHEMA
+You must respond ONLY in the following JSON format:
+{{
+  "thought": "Brief explanation of what you see and why you are taking this step.",
+  "action": "CLICK | TYPE | SCROLL_DOWN | SCROLL_UP | BACK | OPEN_APP",
+  "params": {{
+    "target_id": "string (resource-id)",
+    "text": "string (for TYPE or APP_NAME)",
+    "coords": {{"x": int, "y": int}}
+  }},
+  "is_complete": boolean,
+  "status_message": "User-friendly update"
+}}
+
+### TASK GUIDELINES
+- YouTube: Launch app -> Search -> Type -> Click video.
+- Swiggy/Zomato: Launch app -> Search Hotel -> Select Item -> Add to Cart -> Stop at Payment.
+- Gmail: Open -> Click 'Compose' -> Fill fields -> Send.
         """
         return await self._generate_json_with_fallback(prompt, screenshot)
 

@@ -51,6 +51,17 @@ class ActionCommand(AetherModel):
     x2: Optional[float] = None
     y2: Optional[float] = None
 
+class BrainDecision(AetherModel):
+    thought: str
+    action: str # CLICK, TYPE, SCROLL_DOWN, SCROLL_UP, BACK, OPEN_APP, COMPLETE
+    params: dict = {
+        "target_id": None,
+        "text": None,
+        "coords": {"x": None, "y": None}
+    }
+    is_complete: bool = False
+    status_message: str
+
 class TaskPlan(AetherModel):
     task_id: str
     goal: str

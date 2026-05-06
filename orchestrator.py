@@ -83,54 +83,73 @@ class Orchestrator:
                 active_app = self._current_app.get(task_id, "unknown")
                 screenshot = self._current_screenshot.get(task_id)
                 
-                logger.info(f"Task {task_id}: Consulting LLM (Vision: {screenshot is not None})...")
-                decision = await self.intent_parser.get_next_action(
-                    task.goal, task.steps, nodes, active_app, screenshot
+                # Retrieve history from memory store (placeholder for now)
+                history = [] 
+                
+                logger.info(f"Task {task_id}: Consulting Aether Brain...")
+                decision_data = await self.intent_parser.get_next_action(
+                    task.goal, task.steps, nodes, active_app, 
+                    history=history, screenshot=screenshot
                 )
                 
-                thought = decision.get("thought", "Moving to next step")
-                action_data = decision.get("action")
+                from models import BrainDecision
+                decision = BrainDecision(**decision_data)
                 
-                if not action_data or action_data.get("type") == "complete":
-                    # Wait briefly for any in-flight ack to arrive (Bug 6)
-                    await asyncio.sleep(1.5)
+                # Check for completion
+                if decision.is_complete or decision.action == "COMPLETE":
                     task.status = "completed"
-                    
-                    try:
-                        await self.memory.log_completed_task(task, "completed", user_id)
-                    except Exception as e:
-                        print(f"[Orchestrator] Memory log failed (non-fatal): {e}")
-
+                    await self.memory.log_completed_task(task, "completed", user_id)
                     await websocket.send_json(OutboundMessage(
-                        type= "task_complete",
-                        task_id= task_id,
-                        payload= StatusPayload(
-                            message="Goal achieved!", 
-                            status="completed"
-                        )
+                        type="task_complete",
+                        task_id=task_id,
+                        payload=StatusPayload(message=decision.status_message, status="completed")
                     ).model_dump(by_alias=True))
                     break
 
-                # 3. Map semantic node_id to physical nodeId if needed
-                cmd = ActionCommand(**action_data)
+                # Translate Brain action to ActionCommand type
+                action_map = {
+                    "CLICK": "tap",
+                    "TYPE": "type",
+                    "SCROLL_DOWN": "scroll_down",
+                    "SCROLL_UP": "scroll_up",
+                    "BACK": "back",
+                    "OPEN_APP": "open_app"
+                }
+                
+                action_type = action_map.get(decision.action, "tap")
+                params = decision.params or {}
+                
+                cmd = ActionCommand(
+                    type=action_type,
+                    node_id=params.get("target_id"),
+                    text=params.get("text"),
+                    x=params.get("coords", {}).get("x") if params.get("coords") else None,
+                    y=params.get("coords", {}).get("y") if params.get("coords") else None
+                )
+
+                # 4. Map semantic node_id to physical nodeId if needed
                 if cmd.node_id and not cmd.node_id.startswith("physical_"):
-                    # Use semantic mapper to find the best match in the current tree
                     best_node = self.semantic_mapper.find_best_node(cmd.node_id, nodes)
                     if best_node:
                         logger.info(f"Mapped semantic ID '{cmd.node_id}' -> '{best_node.node_id}'")
                         cmd.node_id = best_node.node_id
-                    else:
-                        logger.warning(f"Could not map semantic ID: {cmd.node_id}")
 
-                # 4. Send command to Android
-                logger.info(f"Task {task_id}: Sending action {cmd.type} - {thought}")
+                # 5. Send command to Android
+                logger.info(f"Task {task_id}: Sending {cmd.type} - {decision.status_message}")
                 await websocket.send_json(OutboundMessage(
-                    type= "command",
-                    task_id= task_id,
-                    payload= CommandPayload(action=cmd, thought=thought)
+                    type="command",
+                    task_id=task_id,
+                    payload=CommandPayload(action=cmd, thought=decision.thought)
                 ).model_dump(by_alias=True))
 
-                # 5. Wait for ACK
+                # Update status message for the user
+                await websocket.send_json(OutboundMessage(
+                    type="status",
+                    task_id=task_id,
+                    payload=StatusPayload(message=decision.status_message, status="running")
+                ).model_dump(by_alias=True))
+
+                # 6. Wait for ACK
                 ack_status = await self._wait_for_ack(task_id, cmd.action_id)
                 if ack_status == "failed":
                     logger.warning(f"Task {task_id}: Action failed on device")
