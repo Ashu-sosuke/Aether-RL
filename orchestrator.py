@@ -37,6 +37,8 @@ class Orchestrator:
                 # Create a fresh event for this observation wait (Bug 5)
                 obs_event = asyncio.Event()
                 self._observation_events[task_id] = obs_event
+                if self._current_nodes.get(task_id):
+                    obs_event.set()
                 
                 try:
                     logger.info(f"Task {task_id}: Waiting for observation...")

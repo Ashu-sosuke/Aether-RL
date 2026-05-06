@@ -8,6 +8,7 @@ from models import NodeData
 @pytest.mark.asyncio
 async def test_parse_goal_returns_valid_plan():
     parser = IntentParser()
+    parser.groq_client = None
     mock_response = MagicMock()
     mock_response.text = '{"goal": "do something", "steps": ["test step"], "context": {}}'
     

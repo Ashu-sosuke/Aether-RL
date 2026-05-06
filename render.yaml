@@ -8,7 +8,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODELS
-        value: gemini-2.0-flash,gemini-1.5-flash-002,gemini-1.5-flash
+        value: gemini-2.5-flash,gemini-2.0-flash,gemini-2.0-flash-lite
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL

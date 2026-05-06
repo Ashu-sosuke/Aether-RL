@@ -87,4 +87,5 @@ async def handle_websocket(websocket: WebSocket, db: AsyncSession):
     finally:
         # Cleanup any tasks associated with this connection if possible
         for tid in active_tasks:
+            orchestrator.stop_task(tid)
             orchestrator.cleanup_task(tid)
